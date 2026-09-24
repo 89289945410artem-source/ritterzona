@@ -9,9 +9,15 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const BOT_TOKEN = process.env.BOT_TOKEN || '';
 const PORT = process.env.PORT || 3000;
+const WEBAPP_URL = process.env.WEBAPP_URL || '';
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || '';
 
 if (!BOT_TOKEN) {
   console.warn('⚠️  BOT_TOKEN не задан — initData не будет проверяться (dev режим)');
+}
+
+if (!WEBAPP_URL) {
+  console.warn('⚠️  WEBAPP_URL не задан — вебхук Telegram не будет установлен');
 }
 
 const app = express();
@@ -913,6 +919,144 @@ app.post('/api/request-nft-withdraw', (req, res) => {
 });
 
 /* =========================================================
+   TELEGRAM BOT: WEBHOOK
+   ========================================================= */
+
+async function sendTelegramMessage(chatId, text, keyboard) {
+  if (!BOT_TOKEN) return;
+
+  const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
+
+  const payload = {
+    chat_id: chatId,
+    text,
+    parse_mode: 'HTML',
+    disable_web_page_preview: true,
+  };
+
+  if (keyboard) {
+    payload.reply_markup = keyboard;
+  }
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      console.warn('[tg] sendMessage failed:', data.description);
+    }
+  } catch (err) {
+    console.error('[tg] sendMessage error:', err);
+  }
+}
+
+async function handleStartCommand(chatId, fromUser) {
+  const firstName = fromUser?.first_name || 'игрок';
+
+  const welcomeText =
+    `<b>👋 Привет, ${firstName}!</b>\n\n` +
+    `Это <b>RITTERZONA</b> — игровая платформа с:\n\n` +
+    `🎯 <b>Рулеткой</b> — угадай цвет и умножь ставку\n` +
+    `🚀 <b>Ракетой</b> — забери выигрыш до краха\n` +
+    `🎁 <b>Кейсами</b> — открывай награды разных редкостей\n\n` +
+    `💰 Стартовый бонус: <b>60 ⭐</b>\n` +
+    `🎁 Ежедневный бонус: <b>+25 ⭐</b>\n\n` +
+    `Нажми кнопку ниже, чтобы начать 👇`;
+
+  const keyboard = WEBAPP_URL
+    ? {
+        inline_keyboard: [
+          [
+            {
+              text: '🎮 Играть',
+              web_app: { url: WEBAPP_URL },
+            },
+          ],
+        ],
+      }
+    : {
+        inline_keyboard: [
+          [
+            {
+              text: '🎮 Играть',
+              url: 'https://t.me/',
+            },
+          ],
+        ],
+      };
+
+  await sendTelegramMessage(chatId, welcomeText, keyboard);
+}
+
+app.post('/api/telegram-webhook', async (req, res) => {
+  try {
+    if (WEBHOOK_SECRET) {
+      const header = req.headers['x-telegram-bot-api-secret-token'];
+      if (header !== WEBHOOK_SECRET) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+    }
+
+    const update = req.body || {};
+    const message = update.message;
+
+    if (message && typeof message.text === 'string') {
+      const chatId = message.chat.id;
+      const text = message.text.trim();
+      const fromUser = message.from;
+
+      if (text === '/start' || text.startsWith('/start ')) {
+        await handleStartCommand(chatId, fromUser);
+      }
+    }
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[tg] webhook error:', err);
+    res.json({ ok: true });
+  }
+});
+
+async function setupTelegramWebhook() {
+  if (!BOT_TOKEN) return;
+  if (!WEBAPP_URL) {
+    console.warn('[tg] WEBAPP_URL не задан — вебхук не настроен');
+    return;
+  }
+
+  const webhookUrl = `${WEBAPP_URL.replace(/\/$/, '')}/api/telegram-webhook`;
+
+  const body = {
+    url: webhookUrl,
+    allowed_updates: ['message', 'callback_query'],
+  };
+
+  if (WEBHOOK_SECRET) body.secret_token = WEBHOOK_SECRET;
+
+  try {
+    const res = await fetch(
+      `https://api.telegram.org/bot${BOT_TOKEN}/setWebhook`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+    );
+    const data = await res.json();
+    if (data.ok) {
+      console.log(`[tg] ✅ Webhook установлен: ${webhookUrl}`);
+    } else {
+      console.warn('[tg] ❌ setWebhook failed:', data.description);
+    }
+  } catch (err) {
+    console.error('[tg] setWebhook error:', err);
+  }
+}
+
+/* =========================================================
    РАЗДАЧА СТАТИКИ
    ========================================================= */
 
@@ -929,10 +1073,13 @@ app.get('*', (req, res) => {
    ЗАПУСК
    ========================================================= */
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`✅ Server running on http://localhost:${PORT}`);
   console.log(`   BOT_TOKEN: ${BOT_TOKEN ? 'установлен' : 'НЕ установлен (dev)'}`);
+  console.log(`   WEBAPP_URL: ${WEBAPP_URL || 'НЕ задан'}`);
   console.log(`   Welcome bonus: ${WELCOME_BONUS} ⭐`);
   console.log(`   Daily bonus: ${DAILY_BONUS} ⭐`);
   console.log(`   Cases: ${CASES.length}`);
+
+  await setupTelegramWebhook();
 });
