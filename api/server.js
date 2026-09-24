@@ -738,4 +738,201 @@ function getPity(tgId, caseId) {
       ) VALUES (?, ?, 0, 0, 0, 0, 0, NULL, ?)
     `).run(tgId, caseId, Date.now());
 
-    row = db.prep
+    row = db.prepare(`
+      SELECT * FROM case_pity
+      WHERE telegram_id = ? AND case_id = ?
+    `).get(tgId, caseId);
+  }
+
+  return row;
+}
+
+function updatePity(tgId, caseId, rarity) {
+  const now = Date.now();
+  const row = getPity(tgId, caseId);
+
+  const newTotal = row.total_opens + 1;
+  const newSinceRare = (rarity === 'rare' || RARITY_ORDER[rarity] > RARITY_ORDER.rare)
+    ? 0 : row.since_rare + 1;
+  const newSinceEpic = (rarity === 'epic' || RARITY_ORDER[rarity] > RARITY_ORDER.epic)
+    ? 0 : row.since_epic + 1;
+  const newSinceLegendary = (rarity === 'legendary') ? 0 : row.since_legendary + 1;
+  const newCommonStreak = rarity === 'common' ? row.common_streak + 1 : 0;
+
+  db.prepare(`
+    UPDATE case_pity
+    SET total_opens = ?, since_rare = ?, since_epic = ?,
+        since_legendary = ?, common_streak = ?, last_drop_rarity = ?,
+        updated_at = ?
+    WHERE telegram_id = ? AND case_id = ?
+  `).run(
+    newTotal,
+    newSinceRare,
+    newSinceEpic,
+    newSinceLegendary,
+    newCommonStreak,
+    rarity,
+    now,
+    tgId,
+    caseId,
+  );
+}
+
+function pickDropWithMechanics(drops, pity, isGuaranteed) {
+  if (isGuaranteed) {
+    const minLevel = RARITY_ORDER[GUARANTEED.minRarity];
+    const guaranteedPool = drops.filter((d) => RARITY_ORDER[d.rarity] >= minLevel);
+
+    if (guaranteedPool.length > 0) {
+      const total = guaranteedPool.reduce((s, d) => s + d.chance, 0);
+      let r = crypto.randomInt(0, Math.floor(total * 10000)) / 10000;
+      for (const d of guaranteedPool) {
+        r -= d.chance;
+        if (r <= 0) return d;
+      }
+      return guaranteedPool[guaranteedPool.length - 1];
+    }
+  }
+
+  const weights = drops.map((d) => {
+    let w = d.chance;
+
+    if (d.rarity === 'rare' && pity.since_rare >= PITY_CONFIG.rare.threshold) {
+      w *= PITY_CONFIG.rare.boost;
+    }
+    if (d.rarity === 'epic' && pity.since_epic >= PITY_CONFIG.epic.threshold) {
+      w *= PITY_CONFIG.epic.boost;
+    }
+    if (d.rarity === 'legendary' && pity.since_legendary >= PITY_CONFIG.legendary.threshold) {
+      w *= PITY_CONFIG.legendary.boost;
+    }
+
+    if (pity.common_streak >= STREAK_CONFIG.commonStreakThreshold) {
+      if (d.rarity === 'epic') w *= STREAK_CONFIG.epicBoost;
+      if (d.rarity === 'legendary') w *= STREAK_CONFIG.legendaryBoost;
+      if (d.rarity === 'common') w *= 0.7;
+    }
+
+    return Math.max(0, w);
+  });
+
+  const total = weights.reduce((s, w) => s + w, 0);
+  if (total <= 0) return drops[crypto.randomInt(0, drops.length)];
+
+  let r = crypto.randomInt(0, Math.floor(total * 10000)) / 10000;
+  for (let i = 0; i < drops.length; i += 1) {
+    r -= weights[i];
+    if (r <= 0) return drops[i];
+  }
+
+  return drops[drops.length - 1];
+}
+
+app.post('/api/game/case', (req, res) => {
+  const { initData, caseId } = req.body || {};
+  const tgUser = verifyInitData(initData);
+  if (!tgUser) return res.status(401).json({ error: 'invalid initData' });
+
+  const caseDef = CASES.find((c) => c.id === caseId);
+  if (!caseDef) return res.status(400).json({ error: 'invalid caseId' });
+
+  const tx = db.transaction(() => {
+    const user = db.prepare('SELECT balance FROM users WHERE telegram_id = ?').get(tgUser.id);
+    if (user.balance < caseDef.price) return { error: 'insufficient funds' };
+
+    const pity = getPity(tgUser.id, caseDef.id);
+    const nextTotal = pity.total_opens + 1;
+    const isGuaranteed = GUARANTEED.every > 0 && nextTotal % GUARANTEED.every === 0;
+
+    const drop = pickDropWithMechanics(caseDef.drops, pity, isGuaranteed);
+
+    const delta = drop.price - caseDef.price;
+    const newBalance = user.balance + delta;
+    const now = Date.now();
+
+    db.prepare(`
+      UPDATE users SET balance = ?, updated_at = ?
+      WHERE telegram_id = ?
+    `).run(newBalance, now, tgUser.id);
+
+    db.prepare(`
+      INSERT INTO transactions (telegram_id, delta, reason, balance_after, created_at)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(tgUser.id, delta, `case:${caseDef.id}`, newBalance, now);
+
+    db.prepare(`
+      INSERT INTO history (telegram_id, game, text, amount, win, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(
+      tgUser.id,
+      caseDef.name,
+      `${drop.name} — ${drop.price} ⭐${isGuaranteed ? ' [ГАРАНТ]' : ''}`,
+      delta,
+      delta >= 0 ? 1 : 0,
+      now,
+    );
+
+    updatePity(tgUser.id, caseDef.id, drop.rarity);
+
+    return { drop, newBalance, delta, isGuaranteed };
+  });
+
+  const result = tx();
+  if (result.error) return res.status(400).json(result);
+
+  console.log(
+    `[case] user ${tgUser.id} ${caseDef.id} → ${result.drop.name} ` +
+    `(${result.drop.rarity}, ${result.drop.price}) delta=${result.delta}` +
+    ` → ${result.newBalance}${result.isGuaranteed ? ' [GUARANTEED]' : ''}`,
+  );
+
+  res.json(result);
+});
+
+/* =========================================================
+   API: ЗАГЛУШКИ
+   ========================================================= */
+
+app.post('/api/create-invoice', (req, res) => {
+  res.status(501).json({ error: 'Invoice API не настроен. Подключи Telegram Bot API.' });
+});
+
+app.post('/api/request-nft-withdraw', (req, res) => {
+  const { userId, amount } = req.body || {};
+  if (!userId || !amount || amount < 500) {
+    return res.status(400).json({ error: 'invalid amount' });
+  }
+
+  const now = Date.now();
+  db.prepare(`
+    INSERT INTO transactions (telegram_id, delta, reason, balance_after, created_at)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(userId, -amount, 'nft_withdraw', 0, now);
+
+  res.json({ ok: true });
+});
+
+/* =========================================================
+   РАЗДАЧА СТАТИКИ
+   ========================================================= */
+
+app.use(express.static(path.join(__dirname, '..', 'dist')));
+
+app.get('*', (req, res) => {
+  if (req.path.startsWith('/api/')) {
+    return res.status(404).json({ error: 'not found' });
+  }
+  res.sendFile(path.join(__dirname, '..', 'dist', 'index.html'));
+});
+
+/* =========================================================
+   ЗАПУСК
+   ========================================================= */
+
+app.listen(PORT, () => {
+  console.log(`✅ Server running on http://localhost:${PORT}`);
+  console.log(`   BOT_TOKEN: ${BOT_TOKEN ? 'установлен' : 'НЕ установлен (dev)'}`);
+  console.log(`   Welcome bonus: ${WELCOME_BONUS} ⭐`);
+  console.log(`   Daily bonus: ${DAILY_BONUS} ⭐`);
+  console.log(`   Cases: ${CASES.length}`);
+});
