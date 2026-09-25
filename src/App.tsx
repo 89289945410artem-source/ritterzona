@@ -20,7 +20,7 @@ import {
 
 type Page = 'home' | 'roulette' | 'rocket' | 'cases';
 
-type Multiplier = 2 | 3 | 5 | 30 | 100;
+type Multiplier = 2 | 3 | 5 | 10 | 30;
 
 type HistoryItem = {
   id: number;
@@ -60,16 +60,16 @@ const COLORS: Record<Multiplier, string> = {
   2: '#929aaa',
   3: '#ef4862',
   5: '#3d94ff',
+  10: '#67edb2',
   30: '#ffd13b',
-  100: '#ff4ddb',
 };
 
 const COLOR_NAMES: Record<Multiplier, string> = {
   2: 'серый',
   3: 'красный',
   5: 'синий',
+  10: 'зелёный',
   30: 'жёлтый',
-  100: 'розовый',
 };
 
 const RARITY_LABEL: Record<Rarity, string> = {
@@ -81,17 +81,17 @@ const RARITY_LABEL: Record<Rarity, string> = {
 };
 
 /* 40 сегментов:
-   x2  — 18 (45%)
-   x3  — 12 (30%)
-   x5  — 7  (17.5%)
-   x30 — 2  (5%)
-   x100 — 1 (2.5%)
+   x2  — 17 (42.5%)  RTP 85%
+   x3  — 12 (30%)    RTP 90%
+   x5  — 7  (17.5%)  RTP 87.5%
+   x10 — 3  (7.5%)   RTP 75%
+   x30 — 1  (2.5%)   RTP 75%
 */
 const BASE_SEGMENTS: Multiplier[] = [
-  2,  3,  2,  5,  3,  2,  3,  2,  5,  3,
-  2,  3,  30, 2,  3,  5,  2,  3,  2,  5,
-  3,  2,  3,  2,  5,  3,  2,  3,  2,  3,
-  5,  2,  3,  2,  3,  2,  100, 3,  30, 2,
+  2,  3,  2,  5,  3,  2,  10, 3,  2,  5,
+  3,  2,  3,  2,  5,  3,  2,  3,  2,  10,
+  3,  2,  5,  3,  2,  3,  2,  5,  3,  2,
+  3,  2,  5,  3,  10, 3,  2,  3,  30, 2,
 ];
 
 const CASES: GameCase[] = [
@@ -458,31 +458,21 @@ function App() {
   const openTopup = useCallback(() => { hapticTap(); setTopupAmount(50); setTopupOpen(true); }, []);
 
   const handleTopup = useCallback(async () => {
-    if (topupAmount < 10) {
-      hapticError();
-      showToast('Минимум 10 ⭐');
-      return;
-    }
-
+    if (topupAmount < 10) { hapticError(); showToast('Минимум 10 ⭐'); return; }
     setTopupLoading(true);
-
     try {
       const initData = window.Telegram?.WebApp?.initData || '';
-
       const res = await fetch('/api/create-invoice', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ initData, amount: topupAmount }),
       });
-
       const data = await res.json();
-
       if (!res.ok || typeof data.balance !== 'number') {
         hapticError();
         showToast(data.error || 'Ошибка пополнения');
         return;
       }
-
       setBalance(data.balance);
       hapticSuccess();
       setTopupOpen(false);
@@ -757,8 +747,8 @@ function Roulette({
     2: segments.filter((i) => i.multiplier === 2).length,
     3: segments.filter((i) => i.multiplier === 3).length,
     5: segments.filter((i) => i.multiplier === 5).length,
+    10: segments.filter((i) => i.multiplier === 10).length,
     30: segments.filter((i) => i.multiplier === 30).length,
-    100: segments.filter((i) => i.multiplier === 100).length,
   }), [segments]);
 
   const wheelGradient = useMemo(() => {
@@ -910,7 +900,7 @@ function Roulette({
       <BetBox bet={bet} setBet={setBet} disabled={spinning} balance={balance} />
 
       <div className="color-buttons">
-        {([2, 3, 5, 30, 100] as Multiplier[]).map((m) => (
+        {([2, 3, 5, 10, 30] as Multiplier[]).map((m) => (
           <button type="button" key={m} disabled={spinning}
             className={selected === m ? 'selected' : ''}
             style={{ borderColor: COLORS[m] }}

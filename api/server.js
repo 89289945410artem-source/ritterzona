@@ -278,21 +278,21 @@ app.post('/api/free-box', (req, res) => {
 });
 
 /* =========================================================
-   РУЛЕТКА
-   ========================================================= */
-
-/* 40 сегментов:
-   x2  — 18 (45%)
-   x3  — 12 (30%)
-   x5  — 7  (17.5%)
-   x30 — 2  (5%)
-   x100 — 1 (2.5%)
+   РУЛЕТКА — балансированная, RTP ≈ 85%
+   =========================================================
+   40 сегментов:
+   x2  — 17 (42.5%)  RTP 85%
+   x3  — 12 (30%)    RTP 90%
+   x5  — 7  (17.5%)  RTP 87.5%
+   x10 — 3  (7.5%)   RTP 75%
+   x30 — 1  (2.5%)   RTP 75%
 */
+
 const BASE_SEGMENTS = [
-  2,  3,  2,  5,  3,  2,  3,  2,  5,  3,
-  2,  3,  30, 2,  3,  5,  2,  3,  2,  5,
-  3,  2,  3,  2,  5,  3,  2,  3,  2,  3,
-  5,  2,  3,  2,  3,  2,  100, 3,  30, 2,
+  2,  3,  2,  5,  3,  2,  10, 3,  2,  5,
+  3,  2,  3,  2,  5,  3,  2,  3,  2,  10,
+  3,  2,  5,  3,  2,  3,  2,  5,  3,  2,
+  3,  2,  5,  3,  10, 3,  2,  3,  30, 2,
 ];
 
 app.post('/api/game/roulette', (req, res) => {
@@ -303,7 +303,7 @@ app.post('/api/game/roulette', (req, res) => {
   const safeBet = Math.floor(Number(bet));
   const safeSelected = Number(selected);
   if (!Number.isFinite(safeBet) || safeBet < 10) return res.status(400).json({ error: 'invalid bet' });
-  if (![2, 3, 5, 30, 100].includes(safeSelected)) return res.status(400).json({ error: 'invalid selected' });
+  if (![2, 3, 5, 10, 30].includes(safeSelected)) return res.status(400).json({ error: 'invalid selected' });
 
   const tx = db.transaction(() => {
     const user = db.prepare('SELECT balance FROM users WHERE telegram_id = ?').get(tgUser.id);
@@ -415,6 +415,9 @@ app.post('/api/game/rocket/cashout', (req, res) => {
 
 /* =========================================================
    КЕЙСЫ
+   =========================================================
+   Шансы: common 65%, uncommon 25%, rare 7%, epic 2.5%, legendary 0.5%
+   RTP ≈ 70-75%
    ========================================================= */
 
 const RARITY_CHANCES = {
