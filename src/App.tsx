@@ -20,7 +20,7 @@ import {
 
 type Page = 'home' | 'roulette' | 'rocket' | 'cases';
 
-type Multiplier = 2 | 3 | 5 | 30;
+type Multiplier = 2 | 3 | 5 | 30 | 100;
 
 type HistoryItem = {
   id: number;
@@ -43,7 +43,6 @@ type Drop = {
   name: string;
   icon: string;
   price: number;
-  chance: number;
   color: string;
   rarity: Rarity;
 };
@@ -62,6 +61,7 @@ const COLORS: Record<Multiplier, string> = {
   3: '#ef4862',
   5: '#3d94ff',
   30: '#ffd13b',
+  100: '#ff4ddb',
 };
 
 const COLOR_NAMES: Record<Multiplier, string> = {
@@ -69,6 +69,7 @@ const COLOR_NAMES: Record<Multiplier, string> = {
   3: 'красный',
   5: 'синий',
   30: 'жёлтый',
+  100: 'розовый',
 };
 
 const RARITY_LABEL: Record<Rarity, string> = {
@@ -79,166 +80,129 @@ const RARITY_LABEL: Record<Rarity, string> = {
   legendary: 'LEGENDARY',
 };
 
+/* 40 сегментов:
+   x2  — 18 (45%)
+   x3  — 12 (30%)
+   x5  — 7  (17.5%)
+   x30 — 2  (5%)
+   x100 — 1 (2.5%)
+*/
 const BASE_SEGMENTS: Multiplier[] = [
-  2, 3, 2, 3, 5, 2, 3, 2, 2, 3,
-  5, 2, 3, 2, 2, 3, 5, 2, 3, 2,
-  2, 5, 3, 2, 2, 3, 5, 2, 3, 2,
-  30,
+  2,  3,  2,  5,  3,  2,  3,  2,  5,  3,
+  2,  3,  30, 2,  3,  5,  2,  3,  2,  5,
+  3,  2,  3,  2,  5,  3,  2,  3,  2,  3,
+  5,  2,  3,  2,  3,  2,  100, 3,  30, 2,
 ];
 
 const CASES: GameCase[] = [
   {
-    id: 'starter',
-    name: 'Starter',
-    price: 10,
-    color: '#8b98b8',
-    tagline: 'Первый шаг',
+    id: 'starter', name: 'Starter', price: 10, color: '#8b98b8', tagline: 'Первый шаг',
     drops: [
-      { id: 'st1', name: 'Rusty Coin',   icon: '🪙', price: 4,   chance: 50, color: '#c7a56b', rarity: 'common' },
-      { id: 'st2', name: 'Copper Ring',  icon: '💍', price: 10,  chance: 25, color: '#e0a35f', rarity: 'uncommon' },
-      { id: 'st3', name: 'Small Gem',    icon: '🔹', price: 15,  chance: 15, color: '#6fd2ff', rarity: 'rare' },
-      { id: 'st4', name: 'Silver Star',  icon: '⭐', price: 60,  chance: 8,  color: '#c18bff', rarity: 'epic' },
-      { id: 'st5', name: 'Blue Crystal', icon: '💎', price: 500, chance: 2,  color: '#ffd13b', rarity: 'legendary' },
+      { id: 'st1', name: 'Rusty Coin',   icon: '🪙', price: 3,   color: '#c7a56b', rarity: 'common' },
+      { id: 'st2', name: 'Copper Ring',  icon: '💍', price: 8,   color: '#e0a35f', rarity: 'uncommon' },
+      { id: 'st3', name: 'Small Gem',    icon: '🔹', price: 25,  color: '#6fd2ff', rarity: 'rare' },
+      { id: 'st4', name: 'Silver Star',  icon: '⭐', price: 100, color: '#c18bff', rarity: 'epic' },
+      { id: 'st5', name: 'Blue Crystal', icon: '💎', price: 700, color: '#ffd13b', rarity: 'legendary' },
     ],
   },
   {
-    id: 'bronze',
-    name: 'Bronze',
-    price: 25,
-    color: '#c07840',
-    tagline: 'Медный век',
+    id: 'bronze', name: 'Bronze', price: 25, color: '#c07840', tagline: 'Медный век',
     drops: [
-      { id: 'b1', name: 'Bronze Coin',    icon: '🪙', price: 15,   chance: 50, color: '#e0a35f', rarity: 'common' },
-      { id: 'b2', name: 'Bronze Star',    icon: '⭐', price: 45,   chance: 25, color: '#55b3ff', rarity: 'uncommon' },
-      { id: 'b3', name: 'Orange Crystal', icon: '🔶', price: 120,  chance: 15, color: '#42d1ff', rarity: 'rare' },
-      { id: 'b4', name: 'Small Crown',    icon: '👑', price: 500,  chance: 8,  color: '#c18bff', rarity: 'epic' },
-      { id: 'b5', name: 'Red Gem',        icon: '💎', price: 4000, chance: 2,  color: '#ffd13b', rarity: 'legendary' },
+      { id: 'b1', name: 'Bronze Coin',    icon: '🪙', price: 10,   color: '#e0a35f', rarity: 'common' },
+      { id: 'b2', name: 'Bronze Star',    icon: '⭐', price: 30,   color: '#55b3ff', rarity: 'uncommon' },
+      { id: 'b3', name: 'Orange Crystal', icon: '🔶', price: 80,   color: '#42d1ff', rarity: 'rare' },
+      { id: 'b4', name: 'Small Crown',    icon: '👑', price: 400,  color: '#c18bff', rarity: 'epic' },
+      { id: 'b5', name: 'Red Gem',        icon: '💎', price: 3000, color: '#ffd13b', rarity: 'legendary' },
     ],
   },
   {
-    id: 'lucky',
-    name: 'Lucky',
-    price: 49,
-    color: '#4ec97f',
-    tagline: 'Удача на твоей стороне',
+    id: 'lucky', name: 'Lucky', price: 49, color: '#4ec97f', tagline: 'Удача на твоей стороне',
     drops: [
-      { id: 'lk1', name: 'Lucky Coin',    icon: '🍀', price: 25,   chance: 50, color: '#8fd9a4', rarity: 'common' },
-      { id: 'lk2', name: 'Green Gem',     icon: '💚', price: 80,   chance: 25, color: '#55b3ff', rarity: 'uncommon' },
-      { id: 'lk3', name: 'Four Leaf',     icon: '🍀', price: 250,  chance: 15, color: '#42d1ff', rarity: 'rare' },
-      { id: 'lk4', name: 'Golden Clover', icon: '🌟', price: 1200, chance: 8,  color: '#c18bff', rarity: 'epic' },
-      { id: 'lk5', name: 'JACKPOT',       icon: '💰', price: 5000, chance: 2,  color: '#ffd13b', rarity: 'legendary' },
+      { id: 'lk1', name: 'Lucky Coin',    icon: '🍀', price: 20,   color: '#8fd9a4', rarity: 'common' },
+      { id: 'lk2', name: 'Green Gem',     icon: '💚', price: 60,   color: '#55b3ff', rarity: 'uncommon' },
+      { id: 'lk3', name: 'Four Leaf',     icon: '🍀', price: 180,  color: '#42d1ff', rarity: 'rare' },
+      { id: 'lk4', name: 'Golden Clover', icon: '🌟', price: 900,  color: '#c18bff', rarity: 'epic' },
+      { id: 'lk5', name: 'JACKPOT',       icon: '💰', price: 4000, color: '#ffd13b', rarity: 'legendary' },
     ],
   },
   {
-    id: 'silver',
-    name: 'Silver',
-    price: 100,
-    color: '#a8b8d6',
-    tagline: 'Лунное серебро',
+    id: 'silver', name: 'Silver', price: 100, color: '#a8b8d6', tagline: 'Лунное серебро',
     drops: [
-      { id: 's1', name: 'Silver Coin',  icon: '🪙', price: 50,    chance: 50, color: '#d4e0f0', rarity: 'common' },
-      { id: 's2', name: 'Silver Star',  icon: '🌟', price: 180,   chance: 25, color: '#55b3ff', rarity: 'uncommon' },
-      { id: 's3', name: 'Blue Crystal', icon: '🔷', price: 500,   chance: 15, color: '#42d1ff', rarity: 'rare' },
-      { id: 's4', name: 'Silver Crown', icon: '👑', price: 2500,  chance: 8,  color: '#c18bff', rarity: 'epic' },
-      { id: 's5', name: 'Ice Gem',      icon: '💎', price: 12000, chance: 2,  color: '#ffd13b', rarity: 'legendary' },
+      { id: 's1', name: 'Silver Coin',  icon: '🪙', price: 40,   color: '#d4e0f0', rarity: 'common' },
+      { id: 's2', name: 'Silver Star',  icon: '🌟', price: 140,  color: '#55b3ff', rarity: 'uncommon' },
+      { id: 's3', name: 'Blue Crystal', icon: '🔷', price: 380,  color: '#42d1ff', rarity: 'rare' },
+      { id: 's4', name: 'Silver Crown', icon: '👑', price: 2000, color: '#c18bff', rarity: 'epic' },
+      { id: 's5', name: 'Ice Gem',      icon: '💎', price: 9000, color: '#ffd13b', rarity: 'legendary' },
     ],
   },
   {
-    id: 'gold',
-    name: 'Gold',
-    price: 250,
-    color: '#ffd13b',
-    tagline: 'Золото фараонов',
+    id: 'gold', name: 'Gold', price: 250, color: '#ffd13b', tagline: 'Золото фараонов',
     drops: [
-      { id: 'g1', name: 'Gold Coin',    icon: '🪙', price: 130,   chance: 50, color: '#ffe071', rarity: 'common' },
-      { id: 'g2', name: 'Gold Star',    icon: '🌟', price: 450,   chance: 25, color: '#55b3ff', rarity: 'uncommon' },
-      { id: 'g3', name: 'Gold Crystal', icon: '🔶', price: 1300,  chance: 15, color: '#42d1ff', rarity: 'rare' },
-      { id: 'g4', name: 'Golden Crown', icon: '👑', price: 6000,  chance: 8,  color: '#c18bff', rarity: 'epic' },
-      { id: 'g5', name: 'Dragon Gem',   icon: '🐉', price: 30000, chance: 2,  color: '#ffd13b', rarity: 'legendary' },
+      { id: 'g1', name: 'Gold Coin',    icon: '🪙', price: 100,   color: '#ffe071', rarity: 'common' },
+      { id: 'g2', name: 'Gold Star',    icon: '🌟', price: 350,   color: '#55b3ff', rarity: 'uncommon' },
+      { id: 'g3', name: 'Gold Crystal', icon: '🔶', price: 1000,  color: '#42d1ff', rarity: 'rare' },
+      { id: 'g4', name: 'Golden Crown', icon: '👑', price: 5000,  color: '#c18bff', rarity: 'epic' },
+      { id: 'g5', name: 'Dragon Gem',   icon: '🐉', price: 25000, color: '#ffd13b', rarity: 'legendary' },
     ],
   },
   {
-    id: 'platinum',
-    name: 'Platinum',
-    price: 500,
-    color: '#8fd7d7',
-    tagline: 'Северное сияние',
+    id: 'platinum', name: 'Platinum', price: 500, color: '#8fd7d7', tagline: 'Северное сияние',
     drops: [
-      { id: 'p1', name: 'Platinum Chip',  icon: '💠', price: 260,   chance: 50, color: '#b8e8e8', rarity: 'common' },
-      { id: 'p2', name: 'Platinum Star',  icon: '✨', price: 900,   chance: 25, color: '#55b3ff', rarity: 'uncommon' },
-      { id: 'p3', name: 'Frost Crystal',  icon: '❄️', price: 2600,  chance: 15, color: '#42d1ff', rarity: 'rare' },
-      { id: 'p4', name: 'Platinum Crown', icon: '👑', price: 12000, chance: 8,  color: '#c18bff', rarity: 'epic' },
-      { id: 'p5', name: 'Frozen Heart',   icon: '💎', price: 60000, chance: 2,  color: '#ffd13b', rarity: 'legendary' },
+      { id: 'p1', name: 'Platinum Chip',  icon: '💠', price: 200,   color: '#b8e8e8', rarity: 'common' },
+      { id: 'p2', name: 'Platinum Star',  icon: '✨', price: 700,   color: '#55b3ff', rarity: 'uncommon' },
+      { id: 'p3', name: 'Frost Crystal',  icon: '❄️', price: 2000,  color: '#42d1ff', rarity: 'rare' },
+      { id: 'p4', name: 'Platinum Crown', icon: '👑', price: 10000, color: '#c18bff', rarity: 'epic' },
+      { id: 'p5', name: 'Frozen Heart',   icon: '💎', price: 50000, color: '#ffd13b', rarity: 'legendary' },
     ],
   },
   {
-    id: 'diamond',
-    name: 'Diamond',
-    price: 1000,
-    color: '#7fd4ff',
-    tagline: 'Ледяное совершенство',
+    id: 'diamond', name: 'Diamond', price: 1000, color: '#7fd4ff', tagline: 'Ледяное совершенство',
     drops: [
-      { id: 'd1', name: 'Diamond Chip',  icon: '💎', price: 520,    chance: 50, color: '#a8e5ff', rarity: 'common' },
-      { id: 'd2', name: 'Diamond Star',  icon: '⭐', price: 1800,   chance: 25, color: '#55b3ff', rarity: 'uncommon' },
-      { id: 'd3', name: 'Aqua Gem',      icon: '🔷', price: 5200,   chance: 15, color: '#42d1ff', rarity: 'rare' },
-      { id: 'd4', name: 'Diamond Crown', icon: '👑', price: 24000,  chance: 8,  color: '#c18bff', rarity: 'epic' },
-      { id: 'd5', name: 'Ocean Heart',   icon: '💠', price: 120000, chance: 2,  color: '#ffd13b', rarity: 'legendary' },
+      { id: 'd1', name: 'Diamond Chip',  icon: '💎', price: 400,    color: '#a8e5ff', rarity: 'common' },
+      { id: 'd2', name: 'Diamond Star',  icon: '⭐', price: 1400,   color: '#55b3ff', rarity: 'uncommon' },
+      { id: 'd3', name: 'Aqua Gem',      icon: '🔷', price: 4000,   color: '#42d1ff', rarity: 'rare' },
+      { id: 'd4', name: 'Diamond Crown', icon: '👑', price: 20000,  color: '#c18bff', rarity: 'epic' },
+      { id: 'd5', name: 'Ocean Heart',   icon: '💠', price: 100000, color: '#ffd13b', rarity: 'legendary' },
     ],
   },
   {
-    id: 'royal',
-    name: 'Royal',
-    price: 2500,
-    color: '#b28fff',
-    tagline: 'Королевский двор',
+    id: 'royal', name: 'Royal', price: 2500, color: '#b28fff', tagline: 'Королевский двор',
     drops: [
-      { id: 'r1', name: 'Royal Chip',     icon: '🟣', price: 1300,   chance: 50, color: '#d4bfff', rarity: 'common' },
-      { id: 'r2', name: 'Royal Star',     icon: '🌟', price: 4500,   chance: 25, color: '#55b3ff', rarity: 'uncommon' },
-      { id: 'r3', name: 'Purple Crystal', icon: '🔮', price: 13000,  chance: 15, color: '#42d1ff', rarity: 'rare' },
-      { id: 'r4', name: 'Royal Crown',    icon: '👑', price: 60000,  chance: 8,  color: '#c18bff', rarity: 'epic' },
-      { id: 'r5', name: 'King Heart',     icon: '💜', price: 300000, chance: 2,  color: '#ffd13b', rarity: 'legendary' },
+      { id: 'r1', name: 'Royal Chip',     icon: '🟣', price: 1000,   color: '#d4bfff', rarity: 'common' },
+      { id: 'r2', name: 'Royal Star',     icon: '🌟', price: 3500,   color: '#55b3ff', rarity: 'uncommon' },
+      { id: 'r3', name: 'Purple Crystal', icon: '🔮', price: 10000,  color: '#42d1ff', rarity: 'rare' },
+      { id: 'r4', name: 'Royal Crown',    icon: '👑', price: 50000,  color: '#c18bff', rarity: 'epic' },
+      { id: 'r5', name: 'King Heart',     icon: '💜', price: 250000, color: '#ffd13b', rarity: 'legendary' },
     ],
   },
   {
-    id: 'cosmic',
-    name: 'Cosmic',
-    price: 5000,
-    color: '#7a6bff',
-    tagline: 'За гранью вселенной',
+    id: 'cosmic', name: 'Cosmic', price: 5000, color: '#7a6bff', tagline: 'За гранью вселенной',
     drops: [
-      { id: 'c1', name: 'Star Dust',      icon: '✨', price: 2600,   chance: 50, color: '#b3aaff', rarity: 'common' },
-      { id: 'c2', name: 'Cosmic Gem',     icon: '🌌', price: 9000,   chance: 25, color: '#55b3ff', rarity: 'uncommon' },
-      { id: 'c3', name: 'Nebula Crystal', icon: '🌠', price: 26000,  chance: 15, color: '#42d1ff', rarity: 'rare' },
-      { id: 'c4', name: 'Galaxy Crown',   icon: '👑', price: 120000, chance: 8,  color: '#c18bff', rarity: 'epic' },
-      { id: 'c5', name: 'Black Hole',     icon: '🕳️', price: 600000, chance: 2,  color: '#ffd13b', rarity: 'legendary' },
+      { id: 'c1', name: 'Star Dust',      icon: '✨', price: 2000,   color: '#b3aaff', rarity: 'common' },
+      { id: 'c2', name: 'Cosmic Gem',     icon: '🌌', price: 7000,   color: '#55b3ff', rarity: 'uncommon' },
+      { id: 'c3', name: 'Nebula Crystal', icon: '🌠', price: 20000,  color: '#42d1ff', rarity: 'rare' },
+      { id: 'c4', name: 'Galaxy Crown',   icon: '👑', price: 100000, color: '#c18bff', rarity: 'epic' },
+      { id: 'c5', name: 'Black Hole',     icon: '🕳️', price: 500000, color: '#ffd13b', rarity: 'legendary' },
     ],
   },
   {
-    id: 'dragon',
-    name: 'Dragon',
-    price: 10000,
-    color: '#ff7a3d',
-    tagline: 'Пламя древних',
+    id: 'dragon', name: 'Dragon', price: 10000, color: '#ff7a3d', tagline: 'Пламя древних',
     drops: [
-      { id: 'dr1', name: 'Dragon Scale', icon: '🐲', price: 5200,    chance: 50, color: '#ff9a6a', rarity: 'common' },
-      { id: 'dr2', name: 'Dragon Claw',  icon: '🗡️', price: 18000,   chance: 25, color: '#55b3ff', rarity: 'uncommon' },
-      { id: 'dr3', name: 'Dragon Eye',   icon: '👁️', price: 52000,   chance: 15, color: '#42d1ff', rarity: 'rare' },
-      { id: 'dr4', name: 'Dragon Crown', icon: '👑', price: 240000,  chance: 8,  color: '#c18bff', rarity: 'epic' },
-      { id: 'dr5', name: 'Dragon Heart', icon: '🐉', price: 1200000, chance: 2,  color: '#ffd13b', rarity: 'legendary' },
+      { id: 'dr1', name: 'Dragon Scale', icon: '🐲', price: 4000,    color: '#ff9a6a', rarity: 'common' },
+      { id: 'dr2', name: 'Dragon Claw',  icon: '🗡️', price: 14000,   color: '#55b3ff', rarity: 'uncommon' },
+      { id: 'dr3', name: 'Dragon Eye',   icon: '👁️', price: 40000,   color: '#42d1ff', rarity: 'rare' },
+      { id: 'dr4', name: 'Dragon Crown', icon: '👑', price: 200000,  color: '#c18bff', rarity: 'epic' },
+      { id: 'dr5', name: 'Dragon Heart', icon: '🐉', price: 1000000, color: '#ffd13b', rarity: 'legendary' },
     ],
   },
   {
-    id: 'legendary',
-    name: 'Legendary',
-    price: 25000,
-    color: '#ffd13b',
-    tagline: 'Легенды не умирают',
+    id: 'legendary', name: 'Legendary', price: 25000, color: '#ffd13b', tagline: 'Легенды не умирают',
     drops: [
-      { id: 'lg1', name: 'Legend Chip',    icon: '🏅', price: 13000,   chance: 50, color: '#ffe071', rarity: 'common' },
-      { id: 'lg2', name: 'Legend Star',    icon: '🌟', price: 45000,   chance: 25, color: '#55b3ff', rarity: 'uncommon' },
-      { id: 'lg3', name: 'Legend Crystal', icon: '🔱', price: 130000,  chance: 15, color: '#42d1ff', rarity: 'rare' },
-      { id: 'lg4', name: 'Legend Crown',   icon: '👑', price: 600000,  chance: 8,  color: '#c18bff', rarity: 'epic' },
-      { id: 'lg5', name: 'GOD TIER',       icon: '💎', price: 3000000, chance: 2,  color: '#ffd13b', rarity: 'legendary' },
+      { id: 'lg1', name: 'Legend Chip',    icon: '🏅', price: 10000,   color: '#ffe071', rarity: 'common' },
+      { id: 'lg2', name: 'Legend Star',    icon: '🌟', price: 35000,   color: '#55b3ff', rarity: 'uncommon' },
+      { id: 'lg3', name: 'Legend Crystal', icon: '🔱', price: 100000,  color: '#42d1ff', rarity: 'rare' },
+      { id: 'lg4', name: 'Legend Crown',   icon: '👑', price: 500000,  color: '#c18bff', rarity: 'epic' },
+      { id: 'lg5', name: 'GOD TIER',       icon: '💎', price: 2500000, color: '#ffd13b', rarity: 'legendary' },
     ],
   },
 ];
@@ -250,16 +214,6 @@ function shuffle<T>(items: T[]): T[] {
     [result[i], result[j]] = [result[j], result[i]];
   }
   return result;
-}
-
-function getRandomDrop(drops: Drop[]): Drop {
-  const total = drops.reduce((sum, item) => sum + item.chance, 0);
-  let random = Math.random() * total;
-  for (const drop of drops) {
-    random -= drop.chance;
-    if (random <= 0) return drop;
-  }
-  return drops[drops.length - 1];
 }
 
 function lighten(hex: string): string {
@@ -479,30 +433,67 @@ function App() {
     finally { setSyncing(false); }
   }, [showToast]);
 
+  const claimFreeBox = useCallback(async () => {
+    const initData = window.Telegram?.WebApp?.initData || '';
+    setSyncing(true);
+    try {
+      const res = await fetch('/api/free-box', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ initData }),
+      });
+      const data = await res.json();
+      if (data.reward) {
+        setBalance(data.newBalance);
+        hapticSuccess();
+        showToast(`📦 +${data.reward} ⭐`);
+      } else if (data.error === 'already_claimed') {
+        const hours = Math.ceil((data.nextAt - Date.now()) / 3600000);
+        showToast(`Free Box через ${hours} ч`);
+      } else showToast('Ошибка');
+    } catch { showToast('Ошибка сети'); }
+    finally { setSyncing(false); }
+  }, [showToast]);
+
   const openTopup = useCallback(() => { hapticTap(); setTopupAmount(50); setTopupOpen(true); }, []);
 
   const handleTopup = useCallback(async () => {
-    if (topupAmount < 10) { hapticError(); showToast('Минимум 10 Stars'); return; }
+    if (topupAmount < 10) {
+      hapticError();
+      showToast('Минимум 10 ⭐');
+      return;
+    }
+
     setTopupLoading(true);
+
     try {
-      const telegram = window.Telegram?.WebApp;
-      const userId = telegram?.initDataUnsafe?.user?.id ?? 0;
+      const initData = window.Telegram?.WebApp?.initData || '';
+
       const res = await fetch('/api/create-invoice', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ amount: topupAmount, userId }),
+        body: JSON.stringify({ initData, amount: topupAmount }),
       });
+
       const data = await res.json();
-      if (!data.invoiceLink) { hapticError(); showToast(data.error || 'Ошибка создания счёта'); return; }
-      telegram?.openInvoice?.(data.invoiceLink, (status) => {
-        if (status === 'paid') {
-          hapticSuccess(); addBalance(topupAmount); setTopupOpen(false); showToast(`✅ +${topupAmount} ⭐ зачислено`);
-        } else if (status === 'cancelled') { hapticError(); showToast('Оплата отменена'); }
-        else if (status === 'failed') { hapticError(); showToast('Оплата не прошла'); }
-      });
-    } catch { hapticError(); showToast('Ошибка сети'); }
-    finally { setTopupLoading(false); }
-  }, [topupAmount, addBalance, showToast]);
+
+      if (!res.ok || typeof data.balance !== 'number') {
+        hapticError();
+        showToast(data.error || 'Ошибка пополнения');
+        return;
+      }
+
+      setBalance(data.balance);
+      hapticSuccess();
+      setTopupOpen(false);
+      showToast(`✅ +${data.amount} ⭐ зачислено`);
+    } catch {
+      hapticError();
+      showToast('Ошибка сети');
+    } finally {
+      setTopupLoading(false);
+    }
+  }, [topupAmount, showToast]);
 
   const openNftWithdraw = useCallback(() => {
     hapticTap();
@@ -578,10 +569,19 @@ function App() {
 
       <div key={page}>
         {page === 'home' && (
-          <Home balance={balance} history={history} setPage={setPage} showToast={showToast} onTopup={openTopup} onNftWithdraw={openNftWithdraw} onClaimBonus={claimDailyBonus} />
+          <Home
+            balance={balance}
+            history={history}
+            setPage={setPage}
+            showToast={showToast}
+            onTopup={openTopup}
+            onNftWithdraw={openNftWithdraw}
+            onClaimBonus={claimDailyBonus}
+            onClaimFreeBox={claimFreeBox}
+          />
         )}
         {page === 'roulette' && (
-          <Roulette balance={balance} setPage={setPage} removeBalance={removeBalance} addBalance={addBalance} addHistory={addHistory} showToast={showToast} />
+          <Roulette balance={balance} setPage={setPage} addHistory={addHistory} showToast={showToast} />
         )}
         {page === 'rocket' && (
           <Rocket balance={balance} removeBalance={removeBalance} onReward={addBalance} addHistory={addHistory} showToast={showToast} />
@@ -612,7 +612,7 @@ function App() {
             <button type="button" className="modal-close" onClick={() => setTopupOpen(false)}>✕</button>
             <div className="modal-emoji">⭐</div>
             <h3>Пополнить баланс</h3>
-            <p className="modal-sub">Минимум <b>10 ⭐</b>. Оплата через Telegram Stars.</p>
+            <p className="modal-sub">Бесплатно, без оплаты. Выбери сумму.</p>
             <div className="topup-display"><span>+</span><b>{topupAmount}</b><span>⭐</span></div>
             <div className="topup-slider">
               <input type="range" min={10} max={1000} step={10} value={topupAmount} onChange={(e) => setTopupAmount(Number(e.target.value))} />
@@ -623,7 +623,7 @@ function App() {
               ))}
             </div>
             <button type="button" className="primary-button full" disabled={topupLoading} onClick={handleTopup}>
-              {topupLoading ? 'Открываем оплату...' : `Оплатить ${topupAmount} ⭐`}
+              {topupLoading ? 'Зачисляем...' : `Получить ${topupAmount} ⭐`}
             </button>
           </div>
         </div>
@@ -655,7 +655,7 @@ function App() {
    ========================================================= */
 
 function Home({
-  balance, history, setPage, showToast, onTopup, onNftWithdraw, onClaimBonus,
+  balance, history, setPage, showToast, onTopup, onNftWithdraw, onClaimBonus, onClaimFreeBox,
 }: {
   balance: number;
   history: HistoryItem[];
@@ -664,6 +664,7 @@ function Home({
   onTopup: () => void;
   onNftWithdraw: () => void;
   onClaimBonus: () => void;
+  onClaimFreeBox: () => void;
 }) {
   return (
     <main>
@@ -671,7 +672,7 @@ function Home({
         <span className="live">● LIVE · 1 284 игроков</span>
         <h1>Играй умнее.<br />Забирай больше.</h1>
         <p>Рулетка, ракета и кейсы<br />в одном игровом пространстве.</p>
-        <button type="button" className="primary-button" onClick={() => { hapticTap(); setPage('roulette'); }}>Начать игру →</button>
+        <button type="button" className="primary-button" onClick={() => { hapticTap(); setPage('cases'); }}>Открыть кейсы →</button>
         <div className="hero-letter">R</div>
       </section>
 
@@ -681,6 +682,11 @@ function Home({
       </section>
 
       <section className="bonus-card">
+        <div><small>Free Box раз в сутки</small><strong>+5–50 ⭐</strong></div>
+        <button type="button" onClick={() => { hapticTap(); onClaimFreeBox(); }}>📦 Открыть</button>
+      </section>
+
+      <section className="bonus-card" style={{ background: 'linear-gradient(180deg, #12332a 0%, #081a14 100%)' }}>
         <div><small>Ежедневный бонус</small><strong>+25 ⭐</strong></div>
         <button type="button" onClick={() => { hapticTap(); onClaimBonus(); }}>🎁 Забрать</button>
       </section>
@@ -692,14 +698,14 @@ function Home({
 
       <h2>Мини-игры</h2>
       <div className="game-grid">
+        <button type="button" onClick={() => { hapticTap(); setPage('cases'); }}>
+          <span className="game-icon blue">🎁</span><b>Кейсы</b><small>Открывай награды</small>
+        </button>
         <button type="button" onClick={() => { hapticTap(); setPage('roulette'); }}>
           <span className="game-icon purple">🎯</span><b>Рулетка</b><small>Выбери множитель и цвет</small>
         </button>
         <button type="button" onClick={() => { hapticTap(); setPage('rocket'); }}>
           <span className="game-icon orange">🚀</span><b>Ракета</b><small>Забери выигрыш до падения</small>
-        </button>
-        <button type="button" onClick={() => { hapticTap(); setPage('cases'); }}>
-          <span className="game-icon blue">🎁</span><b>Кейсы</b><small>Открывай награды</small>
         </button>
         <button type="button" onClick={() => { hapticTap(); showToast(`Игр сыграно: ${history.length}`); }}>
           <span className="game-icon green">🕘</span><b>История</b><small>Последние результаты</small>
@@ -717,12 +723,10 @@ function Home({
    ========================================================= */
 
 function Roulette({
-  balance, setPage, removeBalance, addBalance, addHistory, showToast,
+  balance, setPage, addHistory, showToast,
 }: {
   balance: number;
   setPage: (page: Page) => void;
-  removeBalance: (amount: number) => Promise<boolean>;
-  addBalance: (amount: number) => void;
   addHistory: (game: string, text: string, amount: number, win: boolean) => void;
   showToast: (text: string) => void;
 }) {
@@ -739,6 +743,14 @@ function Roulette({
   const winnerRef = useRef<Segment | null>(null);
   const betRef = useRef(10);
   const selectedRef = useRef<Multiplier>(2);
+  const serverResultRef = useRef<{
+    winner: Segment;
+    betAmount: number;
+    reward: number;
+    delta: number;
+    won: boolean;
+  } | null>(null);
+
   const segmentSize = 360 / segments.length;
 
   const counts = useMemo(() => ({
@@ -746,6 +758,7 @@ function Roulette({
     3: segments.filter((i) => i.multiplier === 3).length,
     5: segments.filter((i) => i.multiplier === 5).length,
     30: segments.filter((i) => i.multiplier === 30).length,
+    100: segments.filter((i) => i.multiplier === 100).length,
   }), [segments]);
 
   const wheelGradient = useMemo(() => {
@@ -761,10 +774,15 @@ function Roulette({
   const startSpin = async () => {
     if (spinning) return;
     hapticTap();
+
     const safeBet = Math.max(10, Math.floor(Number(bet) || 10));
     if (balance < safeBet) { hapticError(); showToast('Недостаточно Stars'); return; }
 
     let winnerMultiplier: Multiplier | null = null;
+    let serverReward = 0;
+    let serverDelta = 0;
+    let serverWon = false;
+
     try {
       const initData = window.Telegram?.WebApp?.initData || '';
       const res = await fetch('/api/game/roulette', {
@@ -773,19 +791,33 @@ function Roulette({
         body: JSON.stringify({ initData, bet: safeBet, selected }),
       });
       const data = await res.json();
+
       if (!res.ok || data.error) {
         hapticError();
         showToast(data.error === 'insufficient funds' ? 'Недостаточно Stars' : 'Ошибка сервера');
         return;
       }
+
       if (typeof data.newBalance === 'number') {
         window.dispatchEvent(new CustomEvent('balance-update', { detail: { balance: data.newBalance } }));
       }
+
       winnerMultiplier = data.winner as Multiplier;
-    } catch { hapticError(); showToast('Ошибка сети'); return; }
+      serverReward = data.reward ?? 0;
+      serverDelta = data.delta ?? 0;
+      serverWon = !!data.won;
+    } catch {
+      hapticError();
+      showToast('Ошибка сети');
+      return;
+    }
+
     if (!winnerMultiplier) return;
 
-    const candidates = segments.map((s, i) => ({ s, i })).filter(({ s }) => s.multiplier === winnerMultiplier);
+    const candidates = segments
+      .map((s, i) => ({ s, i }))
+      .filter(({ s }) => s.multiplier === winnerMultiplier);
+
     const pick = candidates[Math.floor(Math.random() * candidates.length)];
     const winnerIndex = pick.i;
     const winner = pick.s;
@@ -794,16 +826,24 @@ function Roulette({
     betRef.current = safeBet;
     selectedRef.current = selected;
 
-    const center = (winnerIndex + 0.5) * segmentSize;
+    const centerOfWinner = (winnerIndex + 0.5) * segmentSize;
     const jitter = (Math.random() - 0.5) * (segmentSize * 0.4);
-    const targetAngle = 360 - center + jitter;
+    const targetAngle = 360 - centerOfWinner + jitter;
 
     setRotation((current) => {
-      const norm = ((current % 360) + 360) % 360;
-      let delta = targetAngle - norm;
+      const normalized = ((current % 360) + 360) % 360;
+      let delta = targetAngle - normalized;
       delta = ((delta % 360) + 360) % 360;
       return current + 360 * 5 + delta;
     });
+
+    serverResultRef.current = {
+      winner,
+      betAmount: safeBet,
+      reward: serverReward,
+      delta: serverDelta,
+      won: serverWon,
+    };
 
     setResult(null);
     setSpinning(true);
@@ -811,18 +851,29 @@ function Roulette({
 
   const finishSpin = () => {
     if (!spinning) return;
+    const serverData = serverResultRef.current;
     const winner = winnerRef.current;
-    if (!winner) { setSpinning(false); return; }
-    const betAmount = betRef.current;
-    const sel = selectedRef.current;
-    const won = winner.multiplier === sel;
-    const reward = won ? Math.floor(betAmount * winner.multiplier) : 0;
-    const delta = won ? reward - betAmount : -betAmount;
+    if (!winner || !serverData) { setSpinning(false); return; }
+
     setSpinning(false);
     setResult(winner);
-    if (won) { hapticSuccess(); showToast(`Победа! +${reward} ⭐`); }
-    else { hapticError(); showToast(`Выпал ${COLOR_NAMES[winner.multiplier]} цвет`); }
-    addHistory('Рулетка', `Выпал ${COLOR_NAMES[winner.multiplier]} (x${winner.multiplier})`, delta, won);
+
+    if (serverData.won) {
+      hapticSuccess();
+      showToast(`Победа! +${serverData.reward} ⭐`);
+    } else {
+      hapticError();
+      showToast(`Выпал ${COLOR_NAMES[winner.multiplier]} цвет`);
+    }
+
+    addHistory(
+      'Рулетка',
+      `Выпал ${COLOR_NAMES[winner.multiplier]} (x${winner.multiplier})`,
+      serverData.delta,
+      serverData.won,
+    );
+
+    serverResultRef.current = null;
   };
 
   const wheelStyle: CSSProperties = {
@@ -859,7 +910,7 @@ function Roulette({
       <BetBox bet={bet} setBet={setBet} disabled={spinning} balance={balance} />
 
       <div className="color-buttons">
-        {([2, 3, 5, 30] as Multiplier[]).map((m) => (
+        {([2, 3, 5, 30, 100] as Multiplier[]).map((m) => (
           <button type="button" key={m} disabled={spinning}
             className={selected === m ? 'selected' : ''}
             style={{ borderColor: COLORS[m] }}
@@ -928,9 +979,11 @@ function Rocket({
   }, [clearTimers]);
 
   const getCrashPoint = () => {
-    const random = Math.random();
-    const crash = 0.97 / (1 - random + 0.0001);
-    return Math.min(Math.max(Number(crash.toFixed(2)), 1.3), 2000);
+    const instantCrash = Math.random() < 0.08;
+    if (instantCrash) return 1.0;
+    const r = Math.random();
+    const crash = 1 + Math.pow(r, 3) * 20;
+    return Math.min(Math.max(Number(crash.toFixed(2)), 1.3), 100);
   };
 
   const startRocket = async () => {
@@ -1068,7 +1121,7 @@ function Cases({
     const items: Drop[] = [];
     for (let i = 0; i < REEL_LENGTH; i += 1) {
       if (i === WINNER_INDEX) items.push(winner);
-      else items.push(getRandomDrop(pool));
+      else items.push(pool[Math.floor(Math.random() * pool.length)]);
     }
     return items;
   };
@@ -1079,17 +1132,7 @@ function Cases({
     hapticTap();
     if (timerRef.current !== null) { window.clearTimeout(timerRef.current); timerRef.current = null; }
 
-    const localDrop = getRandomDrop(selectedCase.drops);
-    const items = buildReel(localDrop, selectedCase.drops);
-    openingRef.current = true;
-    setOpening(true);
-    setDrop(null);
-    setLastDelta(0);
-    setReel(items);
-    setReelOffset(0);
-
     let serverResult: { drop?: Drop; delta?: number; newBalance?: number; error?: string } | null = null;
-
     try {
       const initData = window.Telegram?.WebApp?.initData || '';
       const res = await fetch('/api/game/case', {
@@ -1099,23 +1142,35 @@ function Cases({
       });
       serverResult = await res.json();
       if (!res.ok || serverResult?.error) {
-        openingRef.current = false;
-        setOpening(false);
-        setReel([]);
-        setReelOffset(0);
         hapticError();
         showToast(serverResult?.error === 'insufficient funds' ? 'Недостаточно Stars' : 'Ошибка сервера');
         return;
       }
     } catch {
-      openingRef.current = false;
-      setOpening(false);
-      setReel([]);
-      setReelOffset(0);
       hapticError();
       showToast('Ошибка сети');
       return;
     }
+
+    const serverDrop = serverResult?.drop;
+    const finalDrop: Drop = serverDrop
+      ? {
+          id: `${selectedCase.id}-${serverDrop.name}`,
+          name: serverDrop.name,
+          icon: serverDrop.icon,
+          price: serverDrop.price,
+          color: serverDrop.color,
+          rarity: serverDrop.rarity || 'common',
+        }
+      : selectedCase.drops[0];
+
+    const items = buildReel(finalDrop, selectedCase.drops);
+    openingRef.current = true;
+    setOpening(true);
+    setDrop(null);
+    setLastDelta(0);
+    setReel(items);
+    setReelOffset(0);
 
     requestAnimationFrame(() => {
       const reelEl = reelRef.current;
@@ -1133,15 +1188,15 @@ function Cases({
       openingRef.current = false;
       timerRef.current = null;
 
-      const serverDrop = serverResult?.drop;
-      const finalDrop: Drop = serverDrop
-        ? { id: `${selectedCase.id}-${serverDrop.name}`, name: serverDrop.name, icon: serverDrop.icon, price: serverDrop.price, chance: serverDrop.chance, color: serverDrop.color, rarity: serverDrop.rarity || 'common' }
-        : localDrop;
+      const delta = typeof serverResult?.delta === 'number'
+        ? serverResult.delta
+        : finalDrop.price - selectedCase.price;
 
-      const delta = typeof serverResult?.delta === 'number' ? serverResult.delta : finalDrop.price - selectedCase.price;
-      const newBalance = typeof serverResult?.newBalance === 'number' ? serverResult.newBalance : balance + delta;
+      const newBalance = typeof serverResult?.newBalance === 'number'
+        ? serverResult.newBalance
+        : balance + delta;
+
       const isProfit = delta >= 0;
-
       setOpening(false);
       setDrop(finalDrop);
       setLastDelta(delta);
@@ -1159,8 +1214,6 @@ function Cases({
   };
 
   const isPremiumCase = selectedCase.price >= 1000;
-  const ev = selectedCase.drops.reduce((sum, d) => sum + (d.price * d.chance) / 100, 0);
-  const rtp = Math.round((ev / selectedCase.price) * 100);
 
   return (
     <main>
@@ -1200,8 +1253,6 @@ function Cases({
           <h2 className="case-hero-title" style={{ ['--case-color' as string]: selectedCase.color }}>{selectedCase.name}</h2>
           <div className="case-hero-meta">
             <span>Цена: <b>{selectedCase.price} ⭐</b></span>
-            <span className="case-hero-meta-sep">·</span>
-            <span>Возврат: <b className="rtp">{rtp}%</b></span>
           </div>
         </div>
 
@@ -1282,7 +1333,7 @@ function Cases({
             <span className="drop-card-icon">{item.icon}</span>
             <b className="drop-card-name">{item.name}</b>
             <div className="drop-card-footer">
-              <span className="drop-card-chance">{item.chance}%</span>
+              <span className="drop-card-chance" />
               <span className="drop-card-price">{item.price} ⭐</span>
             </div>
           </div>
