@@ -182,12 +182,10 @@ app.post('/api/create-invoice', (req, res) => {
   const tx = db.transaction(() => {
     const user = db.prepare('SELECT balance FROM users WHERE telegram_id = ?').get(tgUser.id);
     if (!user) throw new Error('user not found');
-
     const newBalance = user.balance + safeAmount;
     db.prepare(`UPDATE users SET balance = ?, updated_at = ? WHERE telegram_id = ?`).run(newBalance, now, tgUser.id);
     db.prepare(`INSERT INTO transactions (telegram_id, delta, reason, balance_after, created_at) VALUES (?, ?, ?, ?, ?)`)
       .run(tgUser.id, safeAmount, 'topup', newBalance, now);
-
     return newBalance;
   });
 
@@ -283,11 +281,18 @@ app.post('/api/free-box', (req, res) => {
    РУЛЕТКА
    ========================================================= */
 
+/* 40 сегментов:
+   x2  — 18 (45%)
+   x3  — 12 (30%)
+   x5  — 7  (17.5%)
+   x30 — 2  (5%)
+   x100 — 1 (2.5%)
+*/
 const BASE_SEGMENTS = [
-  2, 2, 2, 2, 3, 2, 2, 5, 2, 2,
-  2, 3, 2, 2, 2, 2, 3, 5, 2, 2,
-  2, 2, 2, 3, 2, 2, 5, 2, 2, 3,
-  2, 2, 2, 2, 3, 5, 2, 2, 30, 100,
+  2,  3,  2,  5,  3,  2,  3,  2,  5,  3,
+  2,  3,  30, 2,  3,  5,  2,  3,  2,  5,
+  3,  2,  3,  2,  5,  3,  2,  3,  2,  3,
+  5,  2,  3,  2,  3,  2,  100, 3,  30, 2,
 ];
 
 app.post('/api/game/roulette', (req, res) => {
