@@ -13,8 +13,8 @@ const WEBAPP_URL = process.env.WEBAPP_URL || '';
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || '';
 const CRYPTO_PAY_TOKEN = process.env.CRYPTO_PAY_TOKEN || '';
 const CRYPTO_WEBHOOK_SECRET = process.env.CRYPTO_WEBHOOK_SECRET || '';
+const ADMIN_ID = process.env.ADMIN_ID || '';
 
-// База: на Railway Volume или рядом с server.js
 const DB_PATH = process.env.RAILWAY_VOLUME_MOUNT_PATH
   ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, 'users.db')
   : path.join(__dirname, 'users.db');
@@ -22,6 +22,7 @@ const DB_PATH = process.env.RAILWAY_VOLUME_MOUNT_PATH
 if (!BOT_TOKEN) console.warn('⚠️ BOT_TOKEN не задан');
 if (!WEBAPP_URL) console.warn('⚠️ WEBAPP_URL не задан');
 if (!CRYPTO_PAY_TOKEN) console.warn('⚠️ CRYPTO_PAY_TOKEN не задан');
+if (!ADMIN_ID) console.warn('⚠️ ADMIN_ID не задан (админ-команды отключены)');
 
 const STAR_TO_RUB = 2;
 const USDT_RUB_RATE = 100;
@@ -31,7 +32,7 @@ const DAILY_TICKET_EVERY = 7;
 const PROMO_INVITER_TICKETS = 1;
 const PROMO_ACTIVATOR_BONUS = 5;
 const BOX_PRICE = 1;
-const MIN_WITHDRAW = 500;
+const MIN_WITHDRAW = 10;
 
 const app = express();
 app.use(express.json({ limit: '100kb' }));
@@ -99,6 +100,7 @@ db.exec(`
     amount INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
     created_at INTEGER NOT NULL, processed_at INTEGER
   );
+  CREATE INDEX IF NOT EXISTS idx_withdraw_status ON withdraw_requests(status, created_at DESC);
 `);
 
 function verifyInitData(initData) {
@@ -120,6 +122,45 @@ function verifyInitData(initData) {
   if (Date.now() / 1000 - authDate > 86400) return null;
   try { return JSON.parse(params.get('user')); } catch { return null; }
 }
+
+async function sendTelegramMessage(chatId, text, keyboard) {
+  if (!BOT_TOKEN) return;
+  const payload = { chat_id: chatId, text, parse_mode: 'HTML', disable_web_page_preview: true };
+  if (keyboard) payload.reply_markup = keyboard;
+  try {
+    await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  } catch (err) { console.error('[tg] sendMessage error:', err); }
+}
+
+async function answerCallback(callbackId, text, showAlert = false) {
+  if (!BOT_TOKEN) return;
+  try {
+    await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/answerCallbackQuery`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ callback_query_id: callbackId, text, show_alert: showAlert }),
+    });
+  } catch {}
+}
+
+async function editMessageReplyMarkup(chatId, messageId, replyMarkup) {
+  if (!BOT_TOKEN) return;
+  try {
+    await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/editMessageReplyMarkup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, message_id: messageId, reply_markup: replyMarkup }),
+    });
+  } catch {}
+}
+
+/* =========================================================
+   КВЕСТЫ
+   ========================================================= */
 
 const QUESTS = [
   { id: 'bet1', name: 'Первая ставка', goal: 1, reward: 1 },
@@ -183,7 +224,7 @@ function creditBalance(tgId, amount, reason) {
 }
 
 /* =========================================================
-   AUTH + HISTORY + LIVE WINS
+   AUTH / HISTORY / LIVE WINS
    ========================================================= */
 
 app.post('/api/auth-telegram', (req, res) => {
@@ -397,7 +438,7 @@ app.post('/api/tickets/open', (req, res) => {
 });
 
 /* =========================================================
-   GAMES
+   GAMES — ROULETTE, ROCKET
    ========================================================= */
 
 const BASE_SEGMENTS = [2,3,2,2,3,2,5,2,3,2,2,3,10,2,5,3,2,2,3,2,5,3,2,2,3,2,5,2,3,2,30,10,3,5,3,10,2,2,5,3];
@@ -477,14 +518,12 @@ app.post('/api/game/rocket/cashout', (req, res) => {
     db.prepare(`INSERT INTO transactions (telegram_id, delta, reason, balance_after, created_at) VALUES (?, ?, ?, ?, ?)`).run(tgUser.id, reward, `rocket:win x${multiplier}`, nb, now);
     db.prepare(`INSERT INTO history (telegram_id, game, text, amount, win, created_at) VALUES (?, ?, ?, ?, ?, ?)`).run(tgUser.id, 'Ракета', `Вывод x${multiplier.toFixed(2)}`, reward - round.bet, 1, now);
     db.prepare('DELETE FROM active_rounds WHERE token = ?').run(req.body?.roundToken);
-        if (reward >= 500) addLiveWin(tgUser.id, user.username, 'Ракета', reward);
+    if (reward >= 500) addLiveWin(tgUser.id, user.username, 'Ракета', reward);
     return { reward, newBalance: nb, delta: reward - round.bet };
-
   })();
   if (r.error) return res.status(400).json(r);
   res.json(r);
 });
-
 /* =========================================================
    CASES
    ========================================================= */
@@ -726,26 +765,51 @@ app.post('/api/game/coinfly', (req, res) => {
 });
 
 /* =========================================================
-   WITHDRAW
+   WITHDRAW — с уведомлением админу
    ========================================================= */
 
-app.post('/api/request-nft-withdraw', (req, res) => {
+app.post('/api/request-nft-withdraw', async (req, res) => {
   const tgUser = verifyInitData(req.body?.initData);
   if (!tgUser) return res.status(401).json({ error: 'invalid initData' });
   const amount = Math.floor(Number(req.body?.amount));
   if (!Number.isFinite(amount) || amount < MIN_WITHDRAW) return res.status(400).json({ error: `min ${MIN_WITHDRAW}` });
+
   const now = Date.now();
+  let result;
   const r = db.transaction(() => {
-    const user = db.prepare('SELECT balance FROM users WHERE telegram_id = ?').get(tgUser.id);
+    const user = db.prepare('SELECT * FROM users WHERE telegram_id = ?').get(tgUser.id);
     if (!user || user.balance < amount) return { error: 'insufficient funds' };
     const nb = user.balance - amount;
     db.prepare(`UPDATE users SET balance = ?, updated_at = ? WHERE telegram_id = ?`).run(nb, now, tgUser.id);
     db.prepare(`INSERT INTO transactions (telegram_id, delta, reason, balance_after, created_at) VALUES (?, ?, ?, ?, ?)`).run(tgUser.id, -amount, 'withdraw_request', nb, now);
-    db.prepare(`INSERT INTO withdraw_requests (telegram_id, amount, status, created_at) VALUES (?, ?, 'pending', ?)`).run(tgUser.id, amount, now);
-    return { ok: true, newBalance: nb };
+    const ins = db.prepare(`INSERT INTO withdraw_requests (telegram_id, amount, status, created_at) VALUES (?, ?, 'pending', ?)`).run(tgUser.id, amount, now);
+    return { ok: true, newBalance: nb, requestId: ins.lastInsertRowid };
   })();
   if (r.error) return res.status(400).json(r);
-  res.json(r);
+  result = r;
+
+  // Уведомить админа
+  if (ADMIN_ID && BOT_TOKEN) {
+    try {
+      const user = db.prepare('SELECT username, first_name FROM users WHERE telegram_id = ?').get(tgUser.id);
+      const adminText =
+        `🎁 <b>Новая заявка на NFT-вывод</b>\n\n` +
+        `👤 Игрок: ${user?.first_name || 'без имени'}${user?.username ? ' (@' + user.username + ')' : ''}\n` +
+        `🆔 ID: <code>${tgUser.id}</code>\n` +
+        `💰 Сумма: <b>${amount} ⭐</b>\n` +
+        `📅 Заявка #${result.requestId}\n\n` +
+        `Подтверди или отклони кнопками. После подтверждения отправь подарок в личку игроку вручную.`;
+      const keyboard = {
+        inline_keyboard: [[
+          { text: '✅ Подтвердить', callback_data: `withdraw_approve_${result.requestId}` },
+          { text: '❌ Отклонить', callback_data: `withdraw_reject_${result.requestId}` }
+        ]]
+      };
+      await sendTelegramMessage(ADMIN_ID, adminText, keyboard);
+    } catch (e) { console.error('[withdraw] notify admin error:', e); }
+  }
+
+  res.json({ ok: true, newBalance: result.newBalance, requestId: result.requestId });
 });
 
 /* =========================================================
@@ -839,61 +903,9 @@ app.post('/api/crypto/status', (req, res) => {
   if (!payment) return res.status(404).json({ error: 'not_found' });
   res.json({ status: payment.status, amount: payment.amount });
 });
-
 /* =========================================================
-   STARS
+   STARS INVOICE
    ========================================================= */
-
-async function sendTelegramMessage(chatId, text, keyboard) {
-  if (!BOT_TOKEN) return;
-  const payload = { chat_id: chatId, text, parse_mode: 'HTML', disable_web_page_preview: true };
-  if (keyboard) payload.reply_markup = keyboard;
-  try { await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); } catch {}
-}
-
-async function handleStartCommand(chatId, fromUser) {
-  const text =
-    `<b>👋 Привет, ${fromUser?.first_name || 'игрок'}!</b>\n\n` +
-    `<b>RITTERZONA</b> — кейсы, рулетка, сапёр!\n\n` +
-    `💰 Бонус: <b>5 ⭐ + 1 билет</b>\n\nНажми 👇`;
-  const keyboard = WEBAPP_URL
-    ? { inline_keyboard: [[{ text: '🎮 Играть', web_app: { url: WEBAPP_URL } }]] }
-    : { inline_keyboard: [[{ text: '🎮 Играть', url: 'https://t.me/' }]] };
-  await sendTelegramMessage(chatId, text, keyboard);
-}
-
-app.post('/api/telegram-webhook', async (req, res) => {
-  try {
-    if (WEBHOOK_SECRET) {
-      if (req.headers['x-telegram-bot-api-secret-token'] !== WEBHOOK_SECRET) return res.status(403).json({ error: 'forbidden' });
-    }
-    const update = req.body || {};
-    const message = update.message;
-    if (message && typeof message.text === 'string') {
-      if (message.text.trim() === '/start' || message.text.startsWith('/start ')) {
-        await handleStartCommand(message.chat.id, message.from);
-      }
-    }
-    const sp = update.message?.successful_payment;
-    if (sp) {
-      const payload = sp.invoice_payload || '';
-      const amount = sp.total_amount || 0;
-      const tgId = update.message.from?.id;
-      if (tgId && amount > 0) {
-        const payment = db.prepare(`SELECT * FROM payments WHERE payload = ? AND status = 'pending'`).get(payload);
-        if (payment) {
-          creditBalance(tgId, amount, 'topup_stars');
-          db.prepare(`UPDATE payments SET status = 'paid', paid_at = ? WHERE id = ?`).run(Date.now(), payment.id);
-          console.log(`[stars] ✅ ${amount} ⭐ → ${tgId}`);
-        }
-      }
-    }
-    res.json({ ok: true });
-  } catch (err) {
-    console.error('[tg] webhook error:', err);
-    res.json({ ok: true });
-  }
-});
 
 app.post('/api/create-invoice', async (req, res) => {
   const tgUser = verifyInitData(req.body?.initData);
@@ -929,7 +941,180 @@ app.post('/api/create-invoice', async (req, res) => {
 });
 
 /* =========================================================
-   WEBHOOK SETUP + STATIC + START
+   TELEGRAM WEBHOOK — с обработкой callback_query и админ-команд
+   ========================================================= */
+
+async function handleStartCommand(chatId, fromUser) {
+  const text =
+    `<b>👋 Привет, ${fromUser?.first_name || 'игрок'}!</b>\n\n` +
+    `<b>RITTERZONA</b> — кейсы, рулетка, сапёр!\n\n` +
+    `💰 Бонус: <b>5 ⭐ + 1 билет</b>\n\nНажми 👇`;
+  const keyboard = WEBAPP_URL
+    ? { inline_keyboard: [[{ text: '🎮 Играть', web_app: { url: WEBAPP_URL } }]] }
+    : { inline_keyboard: [[{ text: '🎮 Играть', url: 'https://t.me/' }]] };
+  await sendTelegramMessage(chatId, text, keyboard);
+}
+
+app.post('/api/telegram-webhook', async (req, res) => {
+  try {
+    if (WEBHOOK_SECRET) {
+      if (req.headers['x-telegram-bot-api-secret-token'] !== WEBHOOK_SECRET) return res.status(403).json({ error: 'forbidden' });
+    }
+    const update = req.body || {};
+
+    /* ---------- CALLBACK QUERY (кнопки админа) ---------- */
+    const callback = update.callback_query;
+    if (callback) {
+      const data = callback.data || '';
+      const chatId = callback.message?.chat?.id;
+      const messageId = callback.message?.message_id;
+
+      if (String(chatId) !== String(ADMIN_ID)) {
+        await answerCallback(callback.id, 'Недоступно', true);
+        return res.json({ ok: true });
+      }
+
+      if (data.startsWith('withdraw_approve_')) {
+        const requestId = Number(data.replace('withdraw_approve_', ''));
+        const request = db.prepare(`SELECT * FROM withdraw_requests WHERE id = ?`).get(requestId);
+        if (!request || request.status !== 'pending') {
+          await answerCallback(callback.id, 'Заявка уже обработана', true);
+          return res.json({ ok: true });
+        }
+        db.prepare(`UPDATE withdraw_requests SET status = 'completed', processed_at = ? WHERE id = ?`).run(Date.now(), requestId);
+
+        await sendTelegramMessage(
+          request.telegram_id,
+          `🎁 <b>NFT-подарок отправлен!</b>\n\nТвоя заявка на <b>${request.amount} ⭐</b> одобрена.\nПодарок придёт в личку в течение нескольких минут.`,
+          null
+        );
+
+        await editMessageReplyMarkup(chatId, messageId, {
+          inline_keyboard: [[{ text: '✅ Подтверждена', callback_data: 'noop' }]]
+        });
+        await answerCallback(callback.id, `Заявка #${requestId} подтверждена`);
+        console.log(`[withdraw] ✅ #${requestId} подтверждена админом`);
+      }
+
+      if (data.startsWith('withdraw_reject_')) {
+        const requestId = Number(data.replace('withdraw_reject_', ''));
+        const request = db.prepare(`SELECT * FROM withdraw_requests WHERE id = ?`).get(requestId);
+        if (!request || request.status !== 'pending') {
+          await answerCallback(callback.id, 'Заявка уже обработана', true);
+          return res.json({ ok: true });
+        }
+
+        const now = Date.now();
+        db.transaction(() => {
+          db.prepare(`UPDATE withdraw_requests SET status = 'rejected', processed_at = ? WHERE id = ?`).run(now, requestId);
+          const user = db.prepare('SELECT balance FROM users WHERE telegram_id = ?').get(request.telegram_id);
+          const nb = user.balance + request.amount;
+          db.prepare(`UPDATE users SET balance = ?, updated_at = ? WHERE telegram_id = ?`).run(nb, now, request.telegram_id);
+          db.prepare(`INSERT INTO transactions (telegram_id, delta, reason, balance_after, created_at) VALUES (?, ?, ?, ?, ?)`).run(request.telegram_id, request.amount, 'withdraw_refund', nb, now);
+        })();
+
+        await sendTelegramMessage(
+          request.telegram_id,
+          `❌ Заявка на <b>${request.amount} ⭐</b> отклонена. Баланс возвращён.`,
+          null
+        );
+
+        await editMessageReplyMarkup(chatId, messageId, {
+          inline_keyboard: [[{ text: '❌ Отклонена', callback_data: 'noop' }]]
+        });
+        await answerCallback(callback.id, `Заявка #${requestId} отклонена`);
+        console.log(`[withdraw] ❌ #${requestId} отклонена админом`);
+      }
+
+      return res.json({ ok: true });
+    }
+
+    /* ---------- MESSAGE (текст) ---------- */
+    const message = update.message;
+    if (message && typeof message.text === 'string') {
+      const text = message.text.trim();
+      const chatId = message.chat.id;
+      const fromId = String(message.from?.id);
+
+      // Админ-команды
+      if (ADMIN_ID && fromId === String(ADMIN_ID)) {
+        if (text === '/withdraws' || text === '/w') {
+          const pending = db.prepare(`SELECT * FROM withdraw_requests WHERE status = 'pending' ORDER BY created_at DESC LIMIT 20`).all();
+          if (pending.length === 0) {
+            await sendTelegramMessage(chatId, '📭 Нет активных заявок', null);
+          } else {
+            for (const req of pending) {
+              const user = db.prepare('SELECT username, first_name FROM users WHERE telegram_id = ?').get(req.telegram_id);
+              const txt =
+                `📋 <b>Заявка #${req.id}</b>\n` +
+                `👤 ${user?.first_name || ''}${user?.username ? ' (@' + user.username + ')' : ''}\n` +
+                `🆔 <code>${req.telegram_id}</code>\n` +
+                `💰 ${req.amount} ⭐\n` +
+                `📅 ${new Date(req.created_at).toLocaleString('ru')}`;
+              const kb = {
+                inline_keyboard: [[
+                  { text: '✅ Подтвердить', callback_data: `withdraw_approve_${req.id}` },
+                  { text: '❌ Отклонить', callback_data: `withdraw_reject_${req.id}` }
+                ]]
+              };
+              await sendTelegramMessage(chatId, txt, kb);
+            }
+          }
+        }
+        if (text === '/stats') {
+          const totalUsers = db.prepare(`SELECT COUNT(*) AS c FROM users`).get().c;
+          const pendingCount = db.prepare(`SELECT COUNT(*) AS c FROM withdraw_requests WHERE status = 'pending'`).get().c;
+          const totalBalance = db.prepare(`SELECT SUM(balance) AS s FROM users`).get().s || 0;
+          const totalPaid = db.prepare(`SELECT COUNT(*) AS c FROM payments WHERE status = 'paid'`).get().c;
+          const stats =
+            `📊 <b>Статистика RITTERZONA</b>\n\n` +
+            `👥 Пользователей: <b>${totalUsers}</b>\n` +
+            `💰 Общий баланс: <b>${totalBalance} ⭐</b>\n` +
+            `💳 Успешных платежей: <b>${totalPaid}</b>\n` +
+            `⏳ Заявок на вывод: <b>${pendingCount}</b>`;
+          await sendTelegramMessage(chatId, stats, null);
+        }
+        if (text === '/help') {
+          const help =
+            `<b>Админ-команды</b>\n\n` +
+            `/stats — статистика\n` +
+            `/withdraws — активные заявки на вывод\n` +
+            `/help — эта справка`;
+          await sendTelegramMessage(chatId, help, null);
+        }
+      }
+
+      // /start
+      if (text === '/start' || text.startsWith('/start ')) {
+        await handleStartCommand(chatId, message.from);
+      }
+    }
+
+    /* ---------- SUCCESSFUL PAYMENT (Stars) ---------- */
+    const sp = update.message?.successful_payment;
+    if (sp) {
+      const payload = sp.invoice_payload || '';
+      const amount = sp.total_amount || 0;
+      const tgId = update.message.from?.id;
+      if (tgId && amount > 0) {
+        const payment = db.prepare(`SELECT * FROM payments WHERE payload = ? AND status = 'pending'`).get(payload);
+        if (payment) {
+          creditBalance(tgId, amount, 'topup_stars');
+          db.prepare(`UPDATE payments SET status = 'paid', paid_at = ? WHERE id = ?`).run(Date.now(), payment.id);
+          console.log(`[stars] ✅ ${amount} ⭐ → ${tgId}`);
+        }
+      }
+    }
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[tg] webhook error:', err);
+    res.json({ ok: true });
+  }
+});
+
+/* =========================================================
+   SETUP WEBHOOK
    ========================================================= */
 
 async function setupTelegramWebhook() {
@@ -949,7 +1134,10 @@ async function setupTelegramWebhook() {
   } catch (err) { console.error('[tg] setWebhook error:', err); }
 }
 
-// Статика — frontend в ./dist
+/* =========================================================
+   STATIC + START
+   ========================================================= */
+
 app.use(express.static(path.join(__dirname, 'dist')));
 app.use((req, res, next) => {
   if (req.method !== 'GET') return next();
@@ -962,6 +1150,7 @@ app.listen(PORT, async () => {
   console.log(`   BOT_TOKEN: ${BOT_TOKEN ? 'установлен' : 'НЕ установлен (dev)'}`);
   console.log(`   WEBAPP_URL: ${WEBAPP_URL || 'НЕ задан'}`);
   console.log(`   CRYPTO_PAY_TOKEN: ${CRYPTO_PAY_TOKEN ? 'установлен' : 'НЕ установлен'}`);
+  console.log(`   ADMIN_ID: ${ADMIN_ID || 'НЕ задан'}`);
   console.log(`   Экономика: 1 ⭐ = ${STAR_TO_RUB} ₽`);
   await setupTelegramWebhook();
 });
