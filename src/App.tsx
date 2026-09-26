@@ -152,6 +152,10 @@ function App() {
   const [profileReady, setProfileReady] = useState(false);
   const [syncing, setSyncing] = useState(false);
 
+  // ДЕМО-РЕЖИМ
+  const [demoMode, setDemoMode] = useState(false);
+  const [demoBalance, setDemoBalance] = useState(10000);
+
   const [topupOpen, setTopupOpen] = useState(false);
   const [topupAmount, setTopupAmount] = useState(100);
   const [topupLoading, setTopupLoading] = useState(false);
@@ -282,7 +286,7 @@ function App() {
       } catch {}
     }
     load();
-    const iv = window.setInterval(load, 8000);
+    const iv = window.setInterval(load, 15000);
     return () => { cancelled = true; window.clearInterval(iv); };
   }, []);
 
@@ -558,17 +562,35 @@ function App() {
         </button>
         <div className="balance">
           <small>{user?.first_name ?? 'Баланс'}</small>
-          <strong className={syncing ? 'syncing' : ''}>{balance}</strong>
+          <strong className={syncing ? 'syncing' : ''}>{demoMode ? demoBalance : balance}</strong>
         </div>
+        <button
+          type="button"
+          className={`demo-toggle ${demoMode ? 'active' : ''}`}
+          onClick={() => {
+            hapticTap();
+            if (demoMode) {
+              setDemoMode(false);
+              showToast('Переключено');
+            } else {
+              if (demoBalance < 10) setDemoBalance(10000);
+              setDemoMode(true);
+              showToast('🎮 Бесплатная игра');
+            }
+          }}
+          title="Демо-режим"
+        >
+          🎮
+        </button>
       </header>
 
       <div key={page}>
-        {page === 'home' && <Home balance={balance} history={history} liveWins={liveWins} level={level} streak={streak} totalBets={totalBets} setPage={setPage} onTopup={openTopup} onNftWithdraw={openNftWithdraw} onBonus={() => setPage('bonus')} />}
-        {page === 'roulette' && <Roulette balance={balance} setPage={setPage} showToast={showToast} />}
-        {page === 'rocket' && <Rocket setPage={setPage} showToast={showToast} />}
-        {page === 'cases' && <Cases balance={balance} setPage={setPage} showToast={showToast} />}
-        {page === 'mines' && <Mines setPage={setPage} showToast={showToast} />}
-        {page === 'coinfly' && <Coinfly balance={balance} setPage={setPage} showToast={showToast} />}
+        {page === 'home' && <Home balance={demoMode ? demoBalance : balance} history={history} liveWins={liveWins} level={level} streak={streak} totalBets={totalBets} setPage={setPage} onTopup={openTopup} onNftWithdraw={openNftWithdraw} onBonus={() => setPage('bonus')} />}
+        {page === 'roulette' && <Roulette balance={demoMode ? demoBalance : balance} setBalance={demoMode ? setDemoBalance : undefined} demoMode={demoMode} setPage={setPage} showToast={showToast} />}
+        {page === 'rocket' && <Rocket balance={demoMode ? demoBalance : balance} setBalance={demoMode ? setDemoBalance : undefined} demoMode={demoMode} setPage={setPage} showToast={showToast} />}
+        {page === 'cases' && <Cases balance={demoMode ? demoBalance : balance} setBalance={demoMode ? setDemoBalance : undefined} demoMode={demoMode} setPage={setPage} showToast={showToast} />}
+        {page === 'mines' && <Mines balance={demoMode ? demoBalance : balance} setBalance={demoMode ? setDemoBalance : undefined} demoMode={demoMode} setPage={setPage} showToast={showToast} />}
+        {page === 'coinfly' && <Coinfly balance={demoMode ? demoBalance : balance} setBalance={demoMode ? setDemoBalance : undefined} demoMode={demoMode} setPage={setPage} showToast={showToast} />}
         {page === 'quests' && <Quests quests={quests} setPage={setPage} onClaim={claimQuest} />}
         {page === 'tickets' && <Tickets tickets={tickets} cases={ticketCases} opening={ticketOpening} onOpen={openTicketCase} setPage={setPage} />}
         {page === 'bonus' && <Bonus tickets={tickets} onPromo={openPromo} onClaimBonus={claimDailyBonus} onTickets={() => setPage('tickets')} setPage={setPage} />}
@@ -822,13 +844,15 @@ function Bonus({
 }
 
 /* =========================================================
-   ROULETTE
+   ROULETTE (с демо-режимом)
    ========================================================= */
 
 function Roulette({
-  balance, setPage, showToast,
+  balance, setBalance, demoMode, setPage, showToast,
 }: {
   balance: number;
+  setBalance?: (v: number | ((prev: number) => number)) => void;
+  demoMode: boolean;
   setPage: (page: Page) => void;
   showToast: (text: string) => void;
 }) {
@@ -871,27 +895,43 @@ function Roulette({
     let winnerMultiplier: Multiplier | null = null;
     let serverReward = 0, serverDelta = 0, serverWon = false;
 
-    try {
-      const initData = window.Telegram?.WebApp?.initData || '';
-      const res = await fetch('/api/game/roulette', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ initData, bet: safeBet, selected }),
-      });
-      const data = await res.json();
-      if (!res.ok || data.error) {
-        hapticError();
-        showToast(data.error === 'insufficient funds' ? 'Недостаточно ⭐' : 'Ошибка');
-        return;
+    // ========== ДЕМО-РЕЖИМ ==========
+    if (demoMode && setBalance) {
+      const winChance = Math.random() < 0.8;
+      if (winChance) {
+        winnerMultiplier = selected;
+      } else {
+        const others = ([2, 3, 5, 10, 30] as Multiplier[]).filter(m => m !== selected);
+        winnerMultiplier = others[Math.floor(Math.random() * others.length)];
       }
-      if (typeof data.newBalance === 'number') {
-        window.dispatchEvent(new CustomEvent('balance-update', { detail: { balance: data.newBalance } }));
-      }
-      winnerMultiplier = data.winner;
-      serverReward = data.reward ?? 0;
-      serverDelta = data.delta ?? 0;
-      serverWon = !!data.won;
-    } catch { hapticError(); showToast('Ошибка сети'); return; }
+      serverWon = winnerMultiplier === selected;
+      serverReward = serverWon ? safeBet * winnerMultiplier : 0;
+      serverDelta = serverReward - safeBet;
+      setBalance(prev => prev - safeBet + serverReward);
+    } else {
+      // ========== РЕАЛЬНЫЙ РЕЖИМ ==========
+      try {
+        const initData = window.Telegram?.WebApp?.initData || '';
+        const res = await fetch('/api/game/roulette', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ initData, bet: safeBet, selected }),
+        });
+        const data = await res.json();
+        if (!res.ok || data.error) {
+          hapticError();
+          showToast(data.error === 'insufficient funds' ? 'Недостаточно ⭐' : 'Ошибка');
+          return;
+        }
+        if (typeof data.newBalance === 'number') {
+          window.dispatchEvent(new CustomEvent('balance-update', { detail: { balance: data.newBalance } }));
+        }
+        winnerMultiplier = data.winner;
+        serverReward = data.reward ?? 0;
+        serverDelta = data.delta ?? 0;
+        serverWon = !!data.won;
+      } catch { hapticError(); showToast('Ошибка сети'); return; }
+    }
 
     if (!winnerMultiplier) return;
 
@@ -928,9 +968,11 @@ function Roulette({
     if (serverData.won) { hapticSuccess(); showToast(`Победа! +${serverData.reward} ⭐`); }
     else { hapticError(); showToast(`Выпал ${COLOR_NAMES[winner.multiplier]}`); }
 
-    window.dispatchEvent(new CustomEvent('history-update', {
-      detail: { game: 'Рулетка', text: `Выпал ${COLOR_NAMES[winner.multiplier]}`, amount: serverData.delta, win: serverData.won },
-    }));
+    if (!demoMode) {
+      window.dispatchEvent(new CustomEvent('history-update', {
+        detail: { game: 'Рулетка', text: `Выпал ${COLOR_NAMES[winner.multiplier]}`, amount: serverData.delta, win: serverData.won },
+      }));
+    }
     serverResultRef.current = null;
   };
 
@@ -993,14 +1035,17 @@ function Roulette({
 }
 
 /* =========================================================
-   ROCKET
+   ROCKET (с демо-режимом)
    ========================================================= */
 
 const MIN_CASHOUT = 1.3;
 
 function Rocket({
-  setPage, showToast,
+  balance, setBalance, demoMode, setPage, showToast,
 }: {
+  balance: number;
+  setBalance?: (v: number | ((prev: number) => number)) => void;
+  demoMode: boolean;
   setPage: (page: Page) => void;
   showToast: (text: string) => void;
 }) {
@@ -1042,24 +1087,32 @@ function Rocket({
     let newBalance = 0;
     let roundToken = '';
 
-    try {
-      const initData = window.Telegram?.WebApp?.initData || '';
-      const res = await fetch('/api/game/rocket/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ initData, bet: safeBet }),
-      });
-      const data = await res.json();
-      if (!res.ok || data.error) {
-        hapticError();
-        showToast(data.error === 'insufficient funds' ? 'Недостаточно ⭐' : 'Ошибка');
-        return;
-      }
-      crashPoint = data.crashPoint;
-      newBalance = data.newBalance;
-      roundToken = data.roundToken;
-      window.dispatchEvent(new CustomEvent('balance-update', { detail: { balance: newBalance } }));
-    } catch { hapticError(); showToast('Ошибка сети'); return; }
+    // ДЕМО
+    if (demoMode && setBalance) {
+      crashPoint = 2.5 + Math.random() * 5;
+      newBalance = balance - safeBet;
+      roundToken = 'demo_' + Date.now();
+      setBalance(newBalance);
+    } else {
+      try {
+        const initData = window.Telegram?.WebApp?.initData || '';
+        const res = await fetch('/api/game/rocket/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ initData, bet: safeBet }),
+        });
+        const data = await res.json();
+        if (!res.ok || data.error) {
+          hapticError();
+          showToast(data.error === 'insufficient funds' ? 'Недостаточно ⭐' : 'Ошибка');
+          return;
+        }
+        crashPoint = data.crashPoint;
+        newBalance = data.newBalance;
+        roundToken = data.roundToken;
+        window.dispatchEvent(new CustomEvent('balance-update', { detail: { balance: newBalance } }));
+      } catch { hapticError(); showToast('Ошибка сети'); return; }
+    }
 
     clearTimers();
     const roundId = roundRef.current + 1;
@@ -1097,9 +1150,11 @@ function Rocket({
       setCrashed(true);
       setMultiplier(crashPoint);
       hapticError();
-      window.dispatchEvent(new CustomEvent('history-update', {
-        detail: { game: 'Ракета', text: `Падение на x${crashPoint}`, amount: -safeBet, win: false },
-      }));
+      if (!demoMode) {
+        window.dispatchEvent(new CustomEvent('history-update', {
+          detail: { game: 'Ракета', text: `Падение на x${crashPoint}`, amount: -safeBet, win: false },
+        }));
+      }
       showToast(`Упала на x${crashPoint}`);
       roundTokenRef.current = null;
     }, crashDelay);
@@ -1114,6 +1169,22 @@ function Rocket({
     if (!token) return;
     cashedOutRef.current = true;
 
+    // ДЕМО
+    if (demoMode && setBalance && token.startsWith('demo_')) {
+      const reward = Math.floor(bet * currentMultiplier);
+      setBalance(prev => prev + reward);
+      playingRef.current = false;
+      clearTimers();
+      setPlaying(false);
+      setCanCashOut(false);
+      setCashedOut(true);
+      hapticSuccess();
+      showToast(`Забрали ${reward} ⭐`);
+      roundTokenRef.current = null;
+      return;
+    }
+
+    // Реальный
     try {
       const initData = window.Telegram?.WebApp?.initData || '';
       const res = await fetch('/api/game/rocket/cashout', {
@@ -1176,19 +1247,21 @@ function Rocket({
           {!playing && !crashed && !cashedOut && 'Нажми кнопку'}
         </div>
       </section>
-      <BetBox bet={bet} setBet={setBet} disabled={playing} balance={0} />
+      <BetBox bet={bet} setBet={setBet} disabled={playing} balance={balance} />
     </main>
   );
 }
 
 /* =========================================================
-   CASES
+   CASES (с демо-режимом)
    ========================================================= */
 
 function Cases({
-  balance, setPage, showToast,
+  balance, setBalance, demoMode, setPage, showToast,
 }: {
   balance: number;
+  setBalance?: (v: number | ((prev: number) => number)) => void;
+  demoMode: boolean;
   setPage: (page: Page) => void;
   showToast: (text: string) => void;
 }) {
@@ -1230,25 +1303,43 @@ function Cases({
     if (timerRef.current !== null) { window.clearTimeout(timerRef.current); timerRef.current = null; }
 
     let serverResult: any = null;
-    try {
-      const initData = window.Telegram?.WebApp?.initData || '';
-      const endpoint = selectedCase.id === 'box' ? '/api/box/open' : '/api/game/case';
-      const body = selectedCase.id === 'box'
-        ? { initData }
-        : { initData, caseId: selectedCase.id };
 
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      serverResult = await res.json();
-      if (!res.ok || serverResult?.error) {
-        hapticError();
-        showToast(serverResult?.error === 'insufficient funds' ? 'Недостаточно ⭐' : 'Ошибка');
-        return;
-      }
-    } catch { hapticError(); showToast('Ошибка сети'); return; }
+    // ========== ДЕМО-РЕЖИМ ==========
+    if (demoMode && setBalance) {
+      const winChance = Math.random() < 0.85;
+      const profitable = selectedCase.drops.filter(d => d.price > selectedCase.price);
+      const cheap = selectedCase.drops.filter(d => d.price <= selectedCase.price);
+      const chosen = winChance && profitable.length > 0
+        ? profitable[Math.floor(Math.random() * profitable.length)]
+        : (cheap.length > 0 ? cheap[Math.floor(Math.random() * cheap.length)] : selectedCase.drops[0]);
+      const delta = chosen.price - selectedCase.price;
+      setBalance(prev => prev + delta);
+      serverResult = {
+        drop: { name: chosen.name, icon: chosen.icon, price: chosen.price, color: chosen.color, rarity: chosen.rarity },
+        newBalance: balance + delta,
+        delta,
+      };
+    } else {
+      // ========== РЕАЛЬНЫЙ ==========
+      try {
+        const initData = window.Telegram?.WebApp?.initData || '';
+        const endpoint = selectedCase.id === 'box' ? '/api/box/open' : '/api/game/case';
+        const body = selectedCase.id === 'box'
+          ? { initData }
+          : { initData, caseId: selectedCase.id };
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        serverResult = await res.json();
+        if (!res.ok || serverResult?.error) {
+          hapticError();
+          showToast(serverResult?.error === 'insufficient funds' ? 'Недостаточно ⭐' : 'Ошибка');
+          return;
+        }
+      } catch { hapticError(); showToast('Ошибка сети'); return; }
+    }
 
     let finalDrop: Drop;
     if (selectedCase.id === 'box') {
@@ -1256,6 +1347,8 @@ function Cases({
         finalDrop = { id: 'box-ticket', name: 'Билет 🎟', icon: '🎟', price: 0, color: '#a855f7', rarity: 'epic' };
       } else if (serverResult.type === 'refund') {
         finalDrop = { id: 'box-refund', name: `${serverResult.reward} ⭐`, icon: '🪙', price: serverResult.reward, color: '#22d3ee', rarity: 'rare' };
+      } else if (serverResult.drop) {
+        finalDrop = { id: 'box-drop', name: serverResult.drop.name, icon: serverResult.drop.icon, price: serverResult.drop.price, color: serverResult.drop.color, rarity: serverResult.drop.rarity };
       } else {
         finalDrop = { id: 'box-redirect', name: 'Пусто', icon: '💣', price: 0, color: '#8b98b8', rarity: 'common' };
       }
@@ -1290,7 +1383,7 @@ function Cases({
       timerRef.current = null;
 
       const delta = selectedCase.id === 'box'
-        ? (serverResult.type === 'refund' ? serverResult.reward - 1 : -1)
+        ? (serverResult.type === 'refund' ? serverResult.reward - 1 : (serverResult.drop ? serverResult.delta : -1))
         : (typeof serverResult?.delta === 'number' ? serverResult.delta : finalDrop.price - selectedCase.price);
 
       const newBalance = typeof serverResult?.newBalance === 'number' ? serverResult.newBalance : balance + delta;
@@ -1303,10 +1396,12 @@ function Cases({
       if (selectedCase.id === 'box' && serverResult.type === 'redirect') setBoxRedirect(true);
       if (isProfit) hapticSuccess(); else hapticError();
 
-      window.dispatchEvent(new CustomEvent('balance-update', { detail: { balance: newBalance } }));
-      window.dispatchEvent(new CustomEvent('history-update', {
-        detail: { game: selectedCase.name, text: `${finalDrop.name} — ${finalDrop.price} ⭐`, amount: delta, win: isProfit },
-      }));
+      if (!demoMode) {
+        window.dispatchEvent(new CustomEvent('balance-update', { detail: { balance: newBalance } }));
+        window.dispatchEvent(new CustomEvent('history-update', {
+          detail: { game: selectedCase.name, text: `${finalDrop.name} — ${finalDrop.price} ⭐`, amount: delta, win: isProfit },
+        }));
+      }
 
       const sign = delta > 0 ? '+' : '';
       showToast(isProfit ? `${finalDrop.name}: ${sign}${delta} ⭐` : `${finalDrop.name}: ${delta} ⭐`);
@@ -1444,14 +1539,17 @@ function Cases({
   );
 }
 /* =========================================================
-   MINES
+   MINES (с демо-режимом)
    ========================================================= */
 
 const MINES_FIELD_SIZE = 25;
 
 function Mines({
-  setPage, showToast,
+  balance, setBalance, demoMode, setPage, showToast,
 }: {
+  balance: number;
+  setBalance?: (v: number | ((prev: number) => number)) => void;
+  demoMode: boolean;
   setPage: (page: Page) => void;
   showToast: (text: string) => void;
 }) {
@@ -1481,6 +1579,22 @@ function Mines({
     const safeBet = Math.max(10, Math.floor(Number(bet) || 10));
     hapticTap();
     setBusy(true);
+
+    // ДЕМО
+    if (demoMode && setBalance) {
+      setBet(safeBet);
+      setRoundToken('demo_' + Date.now());
+      setOpened([]);
+      setMultiplier(1);
+      setPotentialReward(0);
+      setExploded(null);
+      setMinePositions([]);
+      setGameEnded(false);
+      setBalance(prev => prev - safeBet);
+      setBusy(false);
+      return;
+    }
+
     try {
       const initData = window.Telegram?.WebApp?.initData || '';
       const res = await fetch('/api/game/mines/start', {
@@ -1511,6 +1625,29 @@ function Mines({
     if (!roundToken || busy || gameEnded || opened.includes(cell) || exploded !== null) return;
     hapticTap();
     setBusy(true);
+
+    // ДЕМО
+    if (demoMode && setBalance && roundToken.startsWith('demo_')) {
+      const safe = Math.random() < 0.88;
+      if (!safe) {
+        setExploded(cell);
+        setMinePositions([cell]);
+        setGameEnded(true);
+        setRoundToken(null);
+        hapticError();
+        showToast('💥 Взорвался');
+      } else {
+        const newOpened = [...opened, cell];
+        setOpened(newOpened);
+        const mult = 1 + newOpened.length * 0.2;
+        setMultiplier(mult);
+        setPotentialReward(Math.floor(bet * mult));
+        hapticSuccess();
+      }
+      setBusy(false);
+      return;
+    }
+
     try {
       const initData = window.Telegram?.WebApp?.initData || '';
       const res = await fetch('/api/game/mines/open', {
@@ -1549,6 +1686,18 @@ function Mines({
     if (!roundToken || busy || opened.length === 0) return;
     hapticTap();
     setBusy(true);
+
+    // ДЕМО
+    if (demoMode && setBalance && roundToken.startsWith('demo_')) {
+      const reward = Math.floor(bet * multiplier);
+      setBalance(prev => prev + reward);
+      hapticSuccess();
+      showToast(`✅ +${reward} ⭐`);
+      resetGame();
+      setBusy(false);
+      return;
+    }
+
     try {
       const initData = window.Telegram?.WebApp?.initData || '';
       const res = await fetch('/api/game/mines/cashout', {
@@ -1606,7 +1755,7 @@ function Mines({
                 </button>
               ))}
             </div>
-            <BetBox bet={bet} setBet={setBet} disabled={false} balance={0} />
+            <BetBox bet={bet} setBet={setBet} disabled={false} balance={balance} />
             <button type="button" className="primary-button full" disabled={busy} onClick={startGame}>
               {busy ? 'Запуск...' : `Начать за ${Math.max(10, bet)} ⭐`}
             </button>
@@ -1659,15 +1808,17 @@ function Mines({
 }
 
 /* =========================================================
-   COINFLY
+   COINFLY (с демо-режимом)
    ========================================================= */
 
 type CoinChoice = 'heads' | 'tails' | 'edge';
 
 function Coinfly({
-  balance, setPage, showToast,
+  balance, setBalance, demoMode, setPage, showToast,
 }: {
   balance: number;
+  setBalance?: (v: number | ((prev: number) => number)) => void;
+  demoMode: boolean;
   setPage: (page: Page) => void;
   showToast: (text: string) => void;
 }) {
@@ -1694,26 +1845,38 @@ function Coinfly({
     let serverNewBalance = 0;
     let serverDelta = 0;
 
-    try {
-      const initData = window.Telegram?.WebApp?.initData || '';
-      const res = await fetch('/api/game/coinfly', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ initData, bet: safeBet, choice }),
-      });
-      const data = await res.json();
-      if (!res.ok || data.error) {
-        hapticError();
-        showToast(data.error === 'insufficient funds' ? 'Недостаточно ⭐' : 'Ошибка');
-        setBusy(false);
-        return;
-      }
-      serverOutcome = data.outcome;
-      serverWon = !!data.won;
-      serverReward = data.reward ?? 0;
-      serverNewBalance = data.newBalance ?? 0;
-      serverDelta = data.delta ?? 0;
-    } catch { hapticError(); showToast('Ошибка сети'); setBusy(false); return; }
+    // ДЕМО
+    if (demoMode && setBalance) {
+      const winChance = Math.random() < 0.9;
+      serverOutcome = winChance ? choice : (choice === 'heads' ? 'tails' : 'heads');
+      serverWon = serverOutcome === choice;
+      const multipliers = { heads: 2, tails: 2, edge: 9 };
+      serverReward = serverWon ? safeBet * multipliers[serverOutcome] : 0;
+      serverDelta = serverReward - safeBet;
+      serverNewBalance = balance - safeBet + serverReward;
+      setBalance(serverNewBalance);
+    } else {
+      try {
+        const initData = window.Telegram?.WebApp?.initData || '';
+        const res = await fetch('/api/game/coinfly', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ initData, bet: safeBet, choice }),
+        });
+        const data = await res.json();
+        if (!res.ok || data.error) {
+          hapticError();
+          showToast(data.error === 'insufficient funds' ? 'Недостаточно ⭐' : 'Ошибка');
+          setBusy(false);
+          return;
+        }
+        serverOutcome = data.outcome;
+        serverWon = !!data.won;
+        serverReward = data.reward ?? 0;
+        serverNewBalance = data.newBalance ?? 0;
+        serverDelta = data.delta ?? 0;
+      } catch { hapticError(); showToast('Ошибка сети'); setBusy(false); return; }
+    }
 
     setFlipping(true);
 
@@ -1722,15 +1885,17 @@ function Coinfly({
       setOutcome(serverOutcome);
       setWon(serverWon);
 
-      window.dispatchEvent(new CustomEvent('balance-update', { detail: { balance: serverNewBalance } }));
-      window.dispatchEvent(new CustomEvent('history-update', {
-        detail: {
-          game: 'Монетка',
-          text: `Выпало ${serverOutcome === 'heads' ? 'орёл' : serverOutcome === 'tails' ? 'решка' : 'ребро'}`,
-          amount: serverDelta,
-          win: serverWon,
-        },
-      }));
+      if (!demoMode) {
+        window.dispatchEvent(new CustomEvent('balance-update', { detail: { balance: serverNewBalance } }));
+        window.dispatchEvent(new CustomEvent('history-update', {
+          detail: {
+            game: 'Монетка',
+            text: `Выпало ${serverOutcome === 'heads' ? 'орёл' : serverOutcome === 'tails' ? 'решка' : 'ребро'}`,
+            amount: serverDelta,
+            win: serverWon,
+          },
+        }));
+      }
 
       if (serverWon) { hapticSuccess(); showToast(`Победа! +${serverReward} ⭐`); }
       else { hapticError(); showToast('Не угадал'); }
