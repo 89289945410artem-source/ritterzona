@@ -6,3 +6,9 @@ api/users.db-shm
 api/users.db-wal
 .env
 .env.local
+users.db
+users.db-shm
+users.db-wal
+.env
+node_modules
+dist
