@@ -32,7 +32,7 @@ const DAILY_TICKET_EVERY = 7;
 const PROMO_INVITER_TICKETS = 1;
 const PROMO_ACTIVATOR_BONUS = 5;
 const BOX_PRICE = 1;
-const MIN_WITHDRAW = 50;
+const MIN_WITHDRAW = 500;
 
 const app = express();
 app.use(express.json({ limit: '100kb' }));

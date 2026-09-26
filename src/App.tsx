@@ -452,7 +452,7 @@ function App() {
 
   const openNftWithdraw = useCallback(() => {
   hapticTap();
-  if (balance === null || balance < 50) { hapticError(); showToast('Минимум 50 ⭐'); return; }
+  if (balance === null || balance < 500) { hapticError(); showToast('Минимум 500 ⭐'); return; }
   setNftOpen(true);
 }, [balance, showToast]);
   const confirmNftWithdraw = useCallback(async () => {
@@ -755,8 +755,8 @@ function Home({
       </section>
 
       <section className="withdraw-card">
-  <div><small>Вывод NFT подарком</small><strong>от 50 ⭐</strong></div>
-  <button type="button" disabled={balance < 50} onClick={onNftWithdraw}>Вывести</button>
+  <div><small>Вывод NFT подарком</small><strong>от 500 ⭐</strong></div>
+  <button type="button" disabled={balance < 500} onClick={onNftWithdraw}>Вывести</button>
 </section>
       <h2>Мини-игры</h2>
       <div className="game-grid">
