@@ -22,7 +22,7 @@ const DB_PATH = process.env.RAILWAY_VOLUME_MOUNT_PATH
 if (!BOT_TOKEN) console.warn('⚠️ BOT_TOKEN не задан');
 if (!WEBAPP_URL) console.warn('⚠️ WEBAPP_URL не задан');
 if (!CRYPTO_PAY_TOKEN) console.warn('⚠️ CRYPTO_PAY_TOKEN не задан');
-if (!ADMIN_ID) console.warn('⚠️ ADMIN_ID не задан (админ-команды отключены)');
+if (!ADMIN_ID) console.warn('⚠️ ADMIN_ID не задан');
 
 const STAR_TO_RUB = 2;
 const USDT_RUB_RATE = 100;
@@ -158,10 +158,6 @@ async function editMessageReplyMarkup(chatId, messageId, replyMarkup) {
   } catch {}
 }
 
-/* =========================================================
-   КВЕСТЫ
-   ========================================================= */
-
 const QUESTS = [
   { id: 'bet1', name: 'Первая ставка', goal: 1, reward: 1 },
   { id: 'bet5', name: '5 ставок', goal: 5, reward: 2 },
@@ -223,10 +219,6 @@ function creditBalance(tgId, amount, reason) {
   })();
 }
 
-/* =========================================================
-   AUTH / HISTORY / LIVE WINS
-   ========================================================= */
-
 app.post('/api/auth-telegram', (req, res) => {
   const tgUser = verifyInitData(req.body?.initData);
   if (!tgUser) return res.status(401).json({ error: 'invalid initData' });
@@ -258,10 +250,6 @@ function addLiveWin(tgId, username, game, amount) {
   db.prepare(`INSERT INTO live_wins (telegram_id, username, game, amount, created_at) VALUES (?, ?, ?, ?, ?)`).run(tgId, username||'Player', game, amount, Date.now());
   db.prepare(`DELETE FROM live_wins WHERE id NOT IN (SELECT id FROM live_wins ORDER BY created_at DESC LIMIT 100)`).run();
 }
-
-/* =========================================================
-   BOX / DAILY / QUESTS
-   ========================================================= */
 
 app.post('/api/box/open', (req, res) => {
   const tgUser = verifyInitData(req.body?.initData);
@@ -339,10 +327,6 @@ app.post('/api/quests/claim', (req, res) => {
   res.json({ balance: nb, reward: quest.reward });
 });
 
-/* =========================================================
-   PROMO
-   ========================================================= */
-
 app.post('/api/promo/create', (req, res) => {
   const tgUser = verifyInitData(req.body?.initData);
   if (!tgUser) return res.status(401).json({ error: 'invalid initData' });
@@ -394,10 +378,6 @@ app.post('/api/promo/redeem', (req, res) => {
   res.json({ ok: true, reward: PROMO_ACTIVATOR_BONUS, message: `Промокод активирован! +${PROMO_ACTIVATOR_BONUS} ⭐` });
 });
 
-/* =========================================================
-   TICKETS
-   ========================================================= */
-
 const TICKET_CASES = [
   { id: 't15', name: 'Ticket Bronze', tickets: 15, color: '#c07840', tagline: '15 билетов', minReward: 50, maxReward: 200 },
   { id: 't30', name: 'Ticket Silver', tickets: 30, color: '#a8b8d6', tagline: '30 билетов', minReward: 150, maxReward: 600 },
@@ -436,10 +416,6 @@ app.post('/api/tickets/open', (req, res) => {
   }
   res.json(r);
 });
-
-/* =========================================================
-   GAMES — ROULETTE, ROCKET
-   ========================================================= */
 
 const BASE_SEGMENTS = [2,3,2,2,3,2,5,2,3,2,2,3,10,2,5,3,2,2,3,2,5,3,2,2,3,2,5,2,3,2,30,10,3,5,3,10,2,2,5,3];
 
@@ -524,9 +500,6 @@ app.post('/api/game/rocket/cashout', (req, res) => {
   if (r.error) return res.status(400).json(r);
   res.json(r);
 });
-/* =========================================================
-   CASES
-   ========================================================= */
 
 const RARITY_CHANCES = { common: 55, uncommon: 25, rare: 12, epic: 5, legendary: 3 };
 
@@ -643,10 +616,6 @@ app.post('/api/game/case', (req, res) => {
   res.json(r);
 });
 
-/* =========================================================
-   MINES
-   ========================================================= */
-
 const MINES_MULTIPLIERS = {
   3: [1.02,1.11,1.21,1.33,1.48,1.65,1.85,2.09,2.39,2.75,3.19,3.73,4.42,5.31,6.47,8.01,10.13,13.17,17.68,24.74,36.51,58.14,108.0,240.2,751.1],
   5: [1.12,1.29,1.5,1.76,2.09,2.52,3.07,3.8,4.79,6.17,8.13,11.01,15.34,22.13,33.4,53.3,90.8,167.9,345.8,806.9,2420.7,12103.6],
@@ -733,10 +702,6 @@ app.post('/api/game/mines/cashout', (req, res) => {
   res.json(r);
 });
 
-/* =========================================================
-   COINFLY
-   ========================================================= */
-
 app.post('/api/game/coinfly', (req, res) => {
   const tgUser = verifyInitData(req.body?.initData);
   if (!tgUser) return res.status(401).json({ error: 'invalid initData' });
@@ -764,10 +729,6 @@ app.post('/api/game/coinfly', (req, res) => {
   res.json(r);
 });
 
-/* =========================================================
-   WITHDRAW — с уведомлением админу
-   ========================================================= */
-
 app.post('/api/request-nft-withdraw', async (req, res) => {
   const tgUser = verifyInitData(req.body?.initData);
   if (!tgUser) return res.status(401).json({ error: 'invalid initData' });
@@ -788,33 +749,35 @@ app.post('/api/request-nft-withdraw', async (req, res) => {
   if (r.error) return res.status(400).json(r);
   result = r;
 
-  // Уведомить админа
   if (ADMIN_ID && BOT_TOKEN) {
     try {
       const user = db.prepare('SELECT username, first_name FROM users WHERE telegram_id = ?').get(tgUser.id);
+      const usernameLine = user?.username
+        ? `📛 Username: <b>@${user.username}</b>\n🔗 <a href="https://t.me/${user.username}">Открыть чат</a>`
+        : `📛 Username: <i>не задан</i>\n🆔 ID: <code>${tgUser.id}</code>`;
       const adminText =
         `🎁 <b>Новая заявка на NFT-вывод</b>\n\n` +
-        `👤 Игрок: ${user?.first_name || 'без имени'}${user?.username ? ' (@' + user.username + ')' : ''}\n` +
-        `🆔 ID: <code>${tgUser.id}</code>\n` +
+        `👤 Игрок: <b>${user?.first_name || 'без имени'}</b>\n` +
+        `${usernameLine}\n` +
         `💰 Сумма: <b>${amount} ⭐</b>\n` +
         `📅 Заявка #${result.requestId}\n\n` +
-        `Подтверди или отклони кнопками. После подтверждения отправь подарок в личку игроку вручную.`;
-      const keyboard = {
-        inline_keyboard: [[
+        `Подтверди или отклони кнопками.`;
+      const rows = [
+        [
           { text: '✅ Подтвердить', callback_data: `withdraw_approve_${result.requestId}` },
           { text: '❌ Отклонить', callback_data: `withdraw_reject_${result.requestId}` }
-        ]]
-      };
+        ]
+      ];
+      if (user?.username) {
+        rows.push([{ text: `💬 Написать @${user.username}`, url: `https://t.me/${user.username}` }]);
+      }
+      const keyboard = { inline_keyboard: rows };
       await sendTelegramMessage(ADMIN_ID, adminText, keyboard);
     } catch (e) { console.error('[withdraw] notify admin error:', e); }
   }
 
   res.json({ ok: true, newBalance: result.newBalance, requestId: result.requestId });
 });
-
-/* =========================================================
-   CRYPTO PAY (CryptoBot)
-   ========================================================= */
 
 const CRYPTO_API = 'https://pay.crypt.bot/api';
 
@@ -903,9 +866,6 @@ app.post('/api/crypto/status', (req, res) => {
   if (!payment) return res.status(404).json({ error: 'not_found' });
   res.json({ status: payment.status, amount: payment.amount });
 });
-/* =========================================================
-   STARS INVOICE
-   ========================================================= */
 
 app.post('/api/create-invoice', async (req, res) => {
   const tgUser = verifyInitData(req.body?.initData);
@@ -940,10 +900,6 @@ app.post('/api/create-invoice', async (req, res) => {
   }
 });
 
-/* =========================================================
-   TELEGRAM WEBHOOK — с обработкой callback_query и админ-команд
-   ========================================================= */
-
 async function handleStartCommand(chatId, fromUser) {
   const text =
     `<b>👋 Привет, ${fromUser?.first_name || 'игрок'}!</b>\n\n` +
@@ -962,7 +918,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
     }
     const update = req.body || {};
 
-    /* ---------- CALLBACK QUERY (кнопки админа) ---------- */
+    /* CALLBACK QUERY */
     const callback = update.callback_query;
     if (callback) {
       const data = callback.data || '';
@@ -982,18 +938,10 @@ app.post('/api/telegram-webhook', async (req, res) => {
           return res.json({ ok: true });
         }
         db.prepare(`UPDATE withdraw_requests SET status = 'completed', processed_at = ? WHERE id = ?`).run(Date.now(), requestId);
-
-        await sendTelegramMessage(
-          request.telegram_id,
-          `🎁 <b>NFT-подарок отправлен!</b>\n\nТвоя заявка на <b>${request.amount} ⭐</b> одобрена.\nПодарок придёт в личку в течение нескольких минут.`,
-          null
-        );
-
-        await editMessageReplyMarkup(chatId, messageId, {
-          inline_keyboard: [[{ text: '✅ Подтверждена', callback_data: 'noop' }]]
-        });
+        await sendTelegramMessage(request.telegram_id, `🎁 <b>NFT-подарок отправлен!</b>\n\nТвоя заявка на <b>${request.amount} ⭐</b> одобрена.\nПодарок придёт в личку в течение нескольких минут.`, null);
+        await editMessageReplyMarkup(chatId, messageId, { inline_keyboard: [[{ text: '✅ Подтверждена', callback_data: 'noop' }]] });
         await answerCallback(callback.id, `Заявка #${requestId} подтверждена`);
-        console.log(`[withdraw] ✅ #${requestId} подтверждена админом`);
+        console.log(`[withdraw] ✅ #${requestId} подтверждена`);
       }
 
       if (data.startsWith('withdraw_reject_')) {
@@ -1003,7 +951,6 @@ app.post('/api/telegram-webhook', async (req, res) => {
           await answerCallback(callback.id, 'Заявка уже обработана', true);
           return res.json({ ok: true });
         }
-
         const now = Date.now();
         db.transaction(() => {
           db.prepare(`UPDATE withdraw_requests SET status = 'rejected', processed_at = ? WHERE id = ?`).run(now, requestId);
@@ -1012,31 +959,22 @@ app.post('/api/telegram-webhook', async (req, res) => {
           db.prepare(`UPDATE users SET balance = ?, updated_at = ? WHERE telegram_id = ?`).run(nb, now, request.telegram_id);
           db.prepare(`INSERT INTO transactions (telegram_id, delta, reason, balance_after, created_at) VALUES (?, ?, ?, ?, ?)`).run(request.telegram_id, request.amount, 'withdraw_refund', nb, now);
         })();
-
-        await sendTelegramMessage(
-          request.telegram_id,
-          `❌ Заявка на <b>${request.amount} ⭐</b> отклонена. Баланс возвращён.`,
-          null
-        );
-
-        await editMessageReplyMarkup(chatId, messageId, {
-          inline_keyboard: [[{ text: '❌ Отклонена', callback_data: 'noop' }]]
-        });
+        await sendTelegramMessage(request.telegram_id, `❌ Заявка на <b>${request.amount} ⭐</b> отклонена. Баланс возвращён.`, null);
+        await editMessageReplyMarkup(chatId, messageId, { inline_keyboard: [[{ text: '❌ Отклонена', callback_data: 'noop' }]] });
         await answerCallback(callback.id, `Заявка #${requestId} отклонена`);
-        console.log(`[withdraw] ❌ #${requestId} отклонена админом`);
+        console.log(`[withdraw] ❌ #${requestId} отклонена`);
       }
 
       return res.json({ ok: true });
     }
 
-    /* ---------- MESSAGE (текст) ---------- */
+    /* MESSAGE */
     const message = update.message;
     if (message && typeof message.text === 'string') {
       const text = message.text.trim();
       const chatId = message.chat.id;
       const fromId = String(message.from?.id);
 
-      // Админ-команды
       if (ADMIN_ID && fromId === String(ADMIN_ID)) {
         if (text === '/withdraws' || text === '/w') {
           const pending = db.prepare(`SELECT * FROM withdraw_requests WHERE status = 'pending' ORDER BY created_at DESC LIMIT 20`).all();
@@ -1045,18 +983,25 @@ app.post('/api/telegram-webhook', async (req, res) => {
           } else {
             for (const req of pending) {
               const user = db.prepare('SELECT username, first_name FROM users WHERE telegram_id = ?').get(req.telegram_id);
+              const usernameLine = user?.username
+                ? `📛 @${user.username}\n🔗 <a href="https://t.me/${user.username}">Открыть чат</a>`
+                : `📛 <i>username не задан</i>\n🆔 <code>${req.telegram_id}</code>`;
               const txt =
                 `📋 <b>Заявка #${req.id}</b>\n` +
-                `👤 ${user?.first_name || ''}${user?.username ? ' (@' + user.username + ')' : ''}\n` +
-                `🆔 <code>${req.telegram_id}</code>\n` +
+                `👤 <b>${user?.first_name || ''}</b>\n` +
+                `${usernameLine}\n` +
                 `💰 ${req.amount} ⭐\n` +
                 `📅 ${new Date(req.created_at).toLocaleString('ru')}`;
-              const kb = {
-                inline_keyboard: [[
+              const rows = [
+                [
                   { text: '✅ Подтвердить', callback_data: `withdraw_approve_${req.id}` },
                   { text: '❌ Отклонить', callback_data: `withdraw_reject_${req.id}` }
-                ]]
-              };
+                ]
+              ];
+              if (user?.username) {
+                rows.push([{ text: `💬 Написать @${user.username}`, url: `https://t.me/${user.username}` }]);
+              }
+              const kb = { inline_keyboard: rows };
               await sendTelegramMessage(chatId, txt, kb);
             }
           }
@@ -1078,19 +1023,18 @@ app.post('/api/telegram-webhook', async (req, res) => {
           const help =
             `<b>Админ-команды</b>\n\n` +
             `/stats — статистика\n` +
-            `/withdraws — активные заявки на вывод\n` +
+            `/withdraws — активные заявки\n` +
             `/help — эта справка`;
           await sendTelegramMessage(chatId, help, null);
         }
       }
 
-      // /start
       if (text === '/start' || text.startsWith('/start ')) {
         await handleStartCommand(chatId, message.from);
       }
     }
 
-    /* ---------- SUCCESSFUL PAYMENT (Stars) ---------- */
+    /* SUCCESSFUL PAYMENT */
     const sp = update.message?.successful_payment;
     if (sp) {
       const payload = sp.invoice_payload || '';
@@ -1113,10 +1057,6 @@ app.post('/api/telegram-webhook', async (req, res) => {
   }
 });
 
-/* =========================================================
-   SETUP WEBHOOK
-   ========================================================= */
-
 async function setupTelegramWebhook() {
   if (!BOT_TOKEN || !WEBAPP_URL) return;
   const url = `${WEBAPP_URL.replace(/\/$/, '')}/api/telegram-webhook`;
@@ -1133,10 +1073,6 @@ async function setupTelegramWebhook() {
     else console.warn('[tg] ❌', data.description);
   } catch (err) { console.error('[tg] setWebhook error:', err); }
 }
-
-/* =========================================================
-   STATIC + START
-   ========================================================= */
 
 app.use(express.static(path.join(__dirname, 'dist')));
 app.use((req, res, next) => {
