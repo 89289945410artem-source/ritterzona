@@ -32,7 +32,7 @@ const DAILY_TICKET_EVERY = 7;
 const PROMO_INVITER_TICKETS = 1;
 const PROMO_ACTIVATOR_BONUS = 5;
 const BOX_PRICE = 1;
-const MIN_WITHDRAW = 10;
+const MIN_WITHDRAW = 50;
 
 const app = express();
 app.use(express.json({ limit: '100kb' }));
@@ -901,13 +901,23 @@ app.post('/api/create-invoice', async (req, res) => {
 });
 
 async function handleStartCommand(chatId, fromUser) {
+  const name = fromUser?.first_name || 'игрок';
   const text =
-    `<b>👋 Привет, ${fromUser?.first_name || 'игрок'}!</b>\n\n` +
-    `<b>RITTERZONA</b> — кейсы, рулетка, сапёр!\n\n` +
-    `💰 Бонус: <b>5 ⭐ + 1 билет</b>\n\nНажми 👇`;
+    `⚡️ <b>${name}, добро пожаловать в RITTERZONA!</b>\n\n` +
+    `🎰 Здесь выигрывают звёзды каждый день.\n` +
+    `Открой свой первый кейс прямо сейчас.\n\n` +
+    `━━━━━━━━━━━━━━━━━\n` +
+    `🎁 <b>Твои стартовые бонусы:</b>\n` +
+    `▫️ <b>+5 ⭐</b> на баланс\n` +
+    `▫️ <b>+1 билет</b> в копилку\n` +
+    `▫️ Ежедневный streak-бонус\n\n` +
+    `━━━━━━━━━━━━━━━━━\n` +
+    `🎯 Кейсы · Рулетка · Ракета\n` +
+    `💣 Сапёр · Монетка · Джекпот\n\n` +
+    `👇 <b>Твой шанс на крупный выигрыш:</b>`;
   const keyboard = WEBAPP_URL
-    ? { inline_keyboard: [[{ text: '🎮 Играть', web_app: { url: WEBAPP_URL } }]] }
-    : { inline_keyboard: [[{ text: '🎮 Играть', url: 'https://t.me/' }]] };
+    ? { inline_keyboard: [[{ text: '🚀 Открыть RITTERZONA', web_app: { url: WEBAPP_URL } }]] }
+    : { inline_keyboard: [[{ text: '🚀 Открыть RITTERZONA', url: 'https://t.me/' }]] };
   await sendTelegramMessage(chatId, text, keyboard);
 }
 
