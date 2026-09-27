@@ -4,11 +4,18 @@ import './appStyles.css';
 import { hapticSuccess, hapticError, hapticTap, getTelegramUser, initTelegram } from './telegram';
 
 type Page = 'home' | 'roulette' | 'rocket' | 'cases' | 'mines' | 'coinfly' | 'quests' | 'promo' | 'tickets' | 'bonus';
-type Multiplier = 2 | 3 | 5 | 10 | 30;
+type Multiplier = 1.8 | 3 | 5 | 8 | 20;
 
 type HistoryItem = { id: number; game: string; text: string; amount: number; win: boolean };
 type Segment = { id: number; multiplier: Multiplier; color: string };
 type Rarity = 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary';
+const RARITY_LABEL: Record<Rarity, string> = {
+  common: 'Обычный',
+  uncommon: 'Необычный',
+  rare: 'Редкий',
+  epic: 'Эпический',
+  legendary: 'Легендарный',
+};
 
 type Drop = { id: string; name: string; icon: string; price: number; color: string; rarity: Rarity };
 type GameCase = { id: string; name: string; price: number; color: string; tagline: string; drops: Drop[] };
@@ -19,16 +26,16 @@ type TicketCase = { id: string; name: string; tickets: number; color: string; ta
 type TopupMethod = 'stars' | 'crypto';
 type CryptoData = { invoiceId: number; payUrl: string; amountUsdt: string; amountStars: number; amountRub: number; payload: string };
 
-const COLORS: Record<Multiplier, string> = { 2: '#9aa0ab', 3: '#ef4444', 5: '#3b82f6', 10: '#22c55e', 30: '#f59e0b' };
-const COLOR_NAMES: Record<Multiplier, string> = { 2: 'серый', 3: 'красный', 5: 'синий', 10: 'зелёный', 30: 'жёлтый' };
-const RARITY_LABEL: Record<Rarity, string> = { common: 'COMMON', uncommon: 'UNCOMMON', rare: 'RARE', epic: 'EPIC', legendary: 'LEGENDARY' };
+const COLORS: Record<Multiplier, string> = { 1.8: '#9aa0ab', 3: '#ef4444', 5: '#3b82f6', 8: '#22c55e', 20: '#f59e0b' };
+const COLOR_NAMES: Record<Multiplier, string> = { 1.8: 'серый', 3: 'красный', 5: 'синий', 8: 'зелёный', 20: 'жёлтый' };
 
 const BASE_SEGMENTS: Multiplier[] = [
-  2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
-  3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
-  5, 5, 5, 5, 5, 5,
-  10, 10, 10,
-  30,
+  1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8,
+  1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8,
+  3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+  5, 5, 5, 5, 5,
+  8, 8, 8,
+  20, 20,
 ];
 
 const CASES: GameCase[] = [
@@ -906,7 +913,7 @@ function Roulette({
   showToast: (text: string) => void;
 }) {
   const [bet, setBet] = useState(10);
-  const [selected, setSelected] = useState<Multiplier>(2);
+  const [selected, setSelected] = useState<Multiplier>(3);
   const [rotation, setRotation] = useState(0);
   const [spinning, setSpinning] = useState(false);
   const [result, setResult] = useState<Segment | null>(null);
@@ -920,12 +927,12 @@ function Roulette({
   const segmentSize = 360 / segments.length;
 
   const counts = useMemo(() => ({
-    2: segments.filter((i) => i.multiplier === 2).length,
+    1.8: segments.filter((i) => i.multiplier === 1.8).length,
     3: segments.filter((i) => i.multiplier === 3).length,
     5: segments.filter((i) => i.multiplier === 5).length,
-    10: segments.filter((i) => i.multiplier === 10).length,
-    30: segments.filter((i) => i.multiplier === 30).length,
-  }), [segments]);
+    8: segments.filter((i) => i.multiplier === 8).length,
+    20: segments.filter((i) => i.multiplier === 20).length,
+}), [segments]);
 
   const wheelGradient = useMemo(() => {
     const stops: string[] = [];
@@ -949,7 +956,7 @@ function Roulette({
       if (winChance) {
         winnerMultiplier = selected;
       } else {
-        const others = ([2, 3, 5, 10, 30] as Multiplier[]).filter(m => m !== selected);
+        const others = ([1.8, 3, 5, 8, 20] as Multiplier[]).filter(m => m !== selected);
         winnerMultiplier = others[Math.floor(Math.random() * others.length)];
       }
       serverWon = winnerMultiplier === selected;
@@ -1057,7 +1064,7 @@ function Roulette({
       <BetBox bet={bet} setBet={setBet} disabled={spinning} balance={balance} />
 
       <div className="color-buttons">
-        {([2, 3, 5, 10, 30] as Multiplier[]).map((m) => (
+        {([1.8, 3, 5, 8, 20] as Multiplier[]).map((m) => (
           <button type="button" key={m} disabled={spinning}
             className={selected === m ? 'selected' : ''}
             style={{ borderColor: COLORS[m] }}
