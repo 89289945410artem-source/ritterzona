@@ -361,8 +361,29 @@ app.post('/api/promo/redeem', (req, res) => {
   if (!code) return res.status(400).json({ error: 'empty' });
   const promo = db.prepare(`SELECT * FROM promocodes WHERE code = ?`).get(code);
   if (!promo) return res.status(400).json({ error: 'not_found' });
-  if (promo.owner_id === tgUser.id) return res.status(400).json({ error: 'own_code' });
-  if (promo.used_by) return res.status(400).json({ error: 'already_used' });
+  app.post('/api/promo/redeem', (req, res) => {
+  const tgUser = verifyInitData(req.body?.initData);
+  if (!tgUser) return res.status(401).json({ error: 'invalid initData' });
+  const code = String(req.body?.code||'').trim().toUpperCase();
+  if (!code) return res.status(400).json({ error: 'empty' });
+  const promo = db.prepare(`SELECT * FROM promocodes WHERE code = ?`).get(code);
+  if (!promo) return res.status(400).json({ error: 'not_found' });
+
+  const now = Date.now();
+  db.transaction(() => {
+    // НЕ помечаем как использованный — код можно вводить много раз
+    const userB = db.prepare('SELECT balance FROM users WHERE telegram_id = ?').get(tgUser.id);
+    if (userB) {
+      const nb = userB.balance + PROMO_ACTIVATOR_BONUS;
+      db.prepare(`UPDATE users SET balance = ?, updated_at = ? WHERE telegram_id = ?`).run(nb, now, tgUser.id);
+      db.prepare(`INSERT INTO transactions (telegram_id, delta, reason, balance_after, created_at) VALUES (?, ?, ?, ?, ?)`).run(tgUser.id, PROMO_ACTIVATOR_BONUS, 'promo_activate', nb, now);
+    }
+    // Инвайтеру — билет за каждую активацию
+    addTickets(promo.owner_id, PROMO_INVITER_TICKETS, `promo:${code}`);
+  })();
+  updateQuest(tgUser.id, 'promo1');
+  res.json({ ok: true, reward: PROMO_ACTIVATOR_BONUS, message: `Промокод активирован! +${PROMO_ACTIVATOR_BONUS} ⭐` });
+});
   const now = Date.now();
   db.transaction(() => {
     db.prepare(`UPDATE promocodes SET used_by = ?, used_at = ? WHERE code = ?`).run(tgUser.id, now, code);
