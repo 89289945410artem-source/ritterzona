@@ -14,7 +14,7 @@ type Drop = { id: string; name: string; icon: string; price: number; color: stri
 type GameCase = { id: string; name: string; price: number; color: string; tagline: string; drops: Drop[] };
 type Quest = { id: string; name: string; goal: number; reward: number; progress: number; claimed: boolean };
 type LiveWin = { username: string; game: string; amount: number; created_at: number };
-type PromoCode = { code: string; used: boolean; usedAt: number | null; usedByUsername: string | null; usedByFirstName: string | null; createdAt: number };
+type PromoCode = { code: string; createdAt: number; usesCount: number; uniqueUsers: number; maxUses: number };
 type TicketCase = { id: string; name: string; tickets: number; color: string; tagline: string; minReward: number; maxReward: number };
 type TopupMethod = 'stars' | 'crypto';
 type CryptoData = { invoiceId: number; payUrl: string; amountUsdt: string; amountStars: number; amountRub: number; payload: string };
@@ -152,7 +152,6 @@ function App() {
   const [profileReady, setProfileReady] = useState(false);
   const [syncing, setSyncing] = useState(false);
 
-  // ДЕМО-РЕЖИМ
   const [demoMode, setDemoMode] = useState(false);
   const [demoBalance, setDemoBalance] = useState(10000);
 
@@ -179,6 +178,8 @@ function App() {
   const [promoList, setPromoList] = useState<PromoCode[]>([]);
   const [promoInput, setPromoInput] = useState('');
   const [promoLoading, setPromoLoading] = useState(false);
+  const [promoUsersOpen, setPromoUsersOpen] = useState<string | null>(null);
+  const [promoUsers, setPromoUsers] = useState<{ firstName: string; username: string | null; usedAt: number }[]>([]);
   const [ticketCases, setTicketCases] = useState<TicketCase[]>([]);
   const [ticketOpening, setTicketOpening] = useState<string | null>(null);
 
@@ -251,9 +252,9 @@ function App() {
           setStreak(data.profile.streak || 0);
           setTickets(data.profile.tickets || 0);
           setProfileReady(true);
-        } else { setBalance(5); setProfileReady(true); }
+        } else { setBalance(45); setProfileReady(true); }
       } catch {
-        if (!cancelled) { setBalance(5); setProfileReady(true); }
+        if (!cancelled) { setBalance(45); setProfileReady(true); }
       }
     }
     loadProfile();
@@ -451,10 +452,11 @@ function App() {
   }, [showToast]);
 
   const openNftWithdraw = useCallback(() => {
-  hapticTap();
-  if (balance === null || balance < 500) { hapticError(); showToast('Минимум 500 ⭐'); return; }
-  setNftOpen(true);
-}, [balance, showToast]);
+    hapticTap();
+    if (balance === null || balance < 500) { hapticError(); showToast('Минимум 500 ⭐'); return; }
+    setNftOpen(true);
+  }, [balance, showToast]);
+
   const confirmNftWithdraw = useCallback(async () => {
     if (balance === null) return;
     setNftLoading(true);
@@ -510,12 +512,31 @@ function App() {
         loadQuests();
       } else {
         hapticError();
-        const map: Record<string, string> = { not_found: 'Код не найден', own_code: 'Нельзя свой', already_used: 'Уже использован', empty: 'Введи код' };
+        const map: Record<string, string> = {
+          not_found: 'Код не найден',
+          empty: 'Введи код',
+          limit_reached: 'Код использован 1000 раз',
+        };
         showToast(map[data.error] || 'Ошибка');
       }
     } catch { hapticError(); showToast('Ошибка сети'); }
     finally { setPromoLoading(false); }
   }, [promoInput, showToast, loadQuests]);
+
+  const openPromoUsers = useCallback(async (code: string) => {
+    hapticTap();
+    const initData = window.Telegram?.WebApp?.initData || '';
+    try {
+      const res = await fetch('/api/promo/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ initData, code }) });
+      const data = await res.json();
+      if (Array.isArray(data.users)) {
+        setPromoUsers(data.users);
+        setPromoUsersOpen(code);
+      } else {
+        showToast(data.error || 'Нет активаций');
+      }
+    } catch { showToast('Ошибка сети'); }
+  }, [showToast]);
 
   const openTicketCase = useCallback(async (caseId: string) => {
     hapticTap();
@@ -622,13 +643,13 @@ function App() {
               ))}
             </div>
             <div className="topup-methods">
-              <button type="button" className={`topup-method ${topupMethod === 'stars' ? 'selected' : ''}`} onClick={() => { hapticTap(); setTopupMethod('stars'); }}>
-                <span className="topup-method-icon">⭐</span>
-                <div><b>Telegram Stars</b><small>мгновенно · {topupAmount} ⭐</small></div>
-              </button>
               <button type="button" className={`topup-method ${topupMethod === 'crypto' ? 'selected' : ''}`} onClick={() => { hapticTap(); setTopupMethod('crypto'); }}>
                 <span className="topup-method-icon">💎</span>
                 <div><b>CryptoBot</b><small>≈ {(topupAmount * 2 / 100).toFixed(2)} USDT</small></div>
+              </button>
+              <button type="button" className={`topup-method ${topupMethod === 'stars' ? 'selected' : ''}`} onClick={() => { hapticTap(); setTopupMethod('stars'); }}>
+                <span className="topup-method-icon">⭐</span>
+                <div><b>Telegram Stars</b><small>мгновенно · {topupAmount} ⭐</small></div>
               </button>
             </div>
             <button type="button" className="primary-button full" disabled={topupLoading} onClick={handleTopup}>
@@ -672,13 +693,13 @@ function App() {
         </div>
       )}
 
-      {promoOpen && (
+      {promoOpen && !promoUsersOpen && (
         <div className="modal-overlay" onClick={() => setPromoOpen(false)}>
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             <button type="button" className="modal-close" onClick={() => setPromoOpen(false)}>✕</button>
             <div className="modal-emoji">🎟</div>
             <h3>Промокоды</h3>
-            <p className="modal-sub">Отправь другу — он получит <b>+5 ⭐</b>, ты — <b>+1 билет</b>.</p>
+            <p className="modal-sub">Отправь другу — он получит <b>+5 ⭐</b>, ты — <b>+1 билет</b>.<br />Один код работает <b>1000 раз</b>.</p>
             <div className="promo-input-row">
               <input type="text" placeholder="RTR-XXXXXX" value={promoInput} onChange={(e) => setPromoInput(e.target.value.toUpperCase())} maxLength={10} />
               <button type="button" className="primary-button" disabled={promoLoading} onClick={redeemPromo}>Ввести</button>
@@ -687,10 +708,11 @@ function App() {
             {promoList.length > 0 && (
               <div className="promo-list">
                 {promoList.map((p) => (
-                  <div key={p.code} className={`promo-row ${p.used ? 'used' : ''}`}>
+                  <div key={p.code} className="promo-row">
                     <b>{p.code}</b>
-                    <small>{p.used ? `✅ ${p.usedByUsername || p.usedByFirstName || 'активирован'}` : '⏳ не активирован'}</small>
-                    {!p.used && <button type="button" onClick={async () => { await navigator.clipboard.writeText(p.code); showToast('Скопирован'); }}>📋</button>}
+                    <small>👥 {p.uniqueUsers} чел. · 🔄 {p.usesCount}/{p.maxUses}</small>
+                    <button type="button" onClick={() => openPromoUsers(p.code)}>👥</button>
+                    <button type="button" onClick={async () => { await navigator.clipboard.writeText(p.code); showToast('Скопирован'); }}>📋</button>
                   </div>
                 ))}
               </div>
@@ -699,10 +721,32 @@ function App() {
         </div>
       )}
 
+      {promoUsersOpen && (
+        <div className="modal-overlay" onClick={() => setPromoUsersOpen(null)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <button type="button" className="modal-close" onClick={() => setPromoUsersOpen(null)}>✕</button>
+            <div className="modal-emoji">👥</div>
+            <h3>Активации</h3>
+            <p className="modal-sub">Код: <b>{promoUsersOpen}</b><br />Всего: <b>{promoUsers.length}</b> активаций</p>
+            <div className="promo-list">
+              {promoUsers.slice(0, 100).map((u, i) => (
+                <div key={i} className="promo-row">
+                  <b>{i + 1}</b>
+                  <small>{u.firstName || 'игрок'}{u.username ? ` (@${u.username})` : ''}</small>
+                  <small>{new Date(u.usedAt).toLocaleString('ru', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</small>
+                </div>
+              ))}
+            </div>
+            <button type="button" className="modal-cancel" onClick={() => setPromoUsersOpen(null)}>Закрыть</button>
+          </div>
+        </div>
+      )}
+
       {toast && <div className="toast" key="toast">{toast}</div>}
     </div>
   );
 }
+
 /* =========================================================
    HOME
    ========================================================= */
@@ -729,11 +773,11 @@ function Home({
   return (
     <main>
       <section className="hero">
-  <span className="live">● LIVE · 1 284 игрока онлайн</span>
-  <h1>Твоя удача.<br />Твои правила.</h1>
-  <p>6 игр · 12 кейсов · ежедневные джекпоты</p>
-  <button type="button" className="primary-button" onClick={() => { hapticTap(); setPage('cases'); }}>Открыть первый кейс →</button>
-</section>
+        <span className="live">● LIVE · 1 284 игрока онлайн</span>
+        <h1>Твоя удача.<br />Твои правила.</h1>
+        <p>6 игр · 12 кейсов · ежедневные джекпоты</p>
+        <button type="button" className="primary-button" onClick={() => { hapticTap(); setPage('cases'); }}>Открыть первый кейс →</button>
+      </section>
 
       <section className="level-card">
         <div className="level-header">
@@ -755,9 +799,10 @@ function Home({
       </section>
 
       <section className="withdraw-card">
-  <div><small>Вывод NFT подарком</small><strong>от 500 ⭐</strong></div>
-  <button type="button" disabled={balance < 500} onClick={onNftWithdraw}>Вывести</button>
-</section>
+        <div><small>Вывод NFT подарком</small><strong>от 500 ⭐</strong></div>
+        <button type="button" disabled={balance < 500} onClick={onNftWithdraw}>Вывести</button>
+      </section>
+
       <h2>Мини-игры</h2>
       <div className="game-grid">
         <button type="button" onClick={() => { hapticTap(); setPage('cases'); }}>
@@ -842,7 +887,7 @@ function Bonus({
 }
 
 /* =========================================================
-   ROULETTE (с демо-режимом)
+   ROULETTE
    ========================================================= */
 
 function Roulette({
@@ -893,7 +938,6 @@ function Roulette({
     let winnerMultiplier: Multiplier | null = null;
     let serverReward = 0, serverDelta = 0, serverWon = false;
 
-    // ========== ДЕМО-РЕЖИМ ==========
     if (demoMode && setBalance) {
       const winChance = Math.random() < 0.8;
       if (winChance) {
@@ -907,7 +951,6 @@ function Roulette({
       serverDelta = serverReward - safeBet;
       setBalance(prev => prev - safeBet + serverReward);
     } else {
-      // ========== РЕАЛЬНЫЙ РЕЖИМ ==========
       try {
         const initData = window.Telegram?.WebApp?.initData || '';
         const res = await fetch('/api/game/roulette', {
@@ -1033,7 +1076,7 @@ function Roulette({
 }
 
 /* =========================================================
-   ROCKET (с демо-режимом)
+   ROCKET
    ========================================================= */
 
 const MIN_CASHOUT = 1.3;
@@ -1085,7 +1128,6 @@ function Rocket({
     let newBalance = 0;
     let roundToken = '';
 
-    // ДЕМО
     if (demoMode && setBalance) {
       crashPoint = 2.5 + Math.random() * 5;
       newBalance = balance - safeBet;
@@ -1167,7 +1209,6 @@ function Rocket({
     if (!token) return;
     cashedOutRef.current = true;
 
-    // ДЕМО
     if (demoMode && setBalance && token.startsWith('demo_')) {
       const reward = Math.floor(bet * currentMultiplier);
       setBalance(prev => prev + reward);
@@ -1182,7 +1223,6 @@ function Rocket({
       return;
     }
 
-    // Реальный
     try {
       const initData = window.Telegram?.WebApp?.initData || '';
       const res = await fetch('/api/game/rocket/cashout', {
@@ -1251,7 +1291,7 @@ function Rocket({
 }
 
 /* =========================================================
-   CASES (с демо-режимом)
+   CASES
    ========================================================= */
 
 function Cases({
@@ -1302,7 +1342,6 @@ function Cases({
 
     let serverResult: any = null;
 
-    // ========== ДЕМО-РЕЖИМ ==========
     if (demoMode && setBalance) {
       const winChance = Math.random() < 0.85;
       const profitable = selectedCase.drops.filter(d => d.price > selectedCase.price);
@@ -1318,7 +1357,6 @@ function Cases({
         delta,
       };
     } else {
-      // ========== РЕАЛЬНЫЙ ==========
       try {
         const initData = window.Telegram?.WebApp?.initData || '';
         const endpoint = selectedCase.id === 'box' ? '/api/box/open' : '/api/game/case';
@@ -1536,8 +1574,9 @@ function Cases({
     </main>
   );
 }
+
 /* =========================================================
-   MINES (с демо-режимом)
+   MINES
    ========================================================= */
 
 const MINES_FIELD_SIZE = 25;
@@ -1578,7 +1617,6 @@ function Mines({
     hapticTap();
     setBusy(true);
 
-    // ДЕМО
     if (demoMode && setBalance) {
       setBet(safeBet);
       setRoundToken('demo_' + Date.now());
@@ -1624,7 +1662,6 @@ function Mines({
     hapticTap();
     setBusy(true);
 
-    // ДЕМО
     if (demoMode && setBalance && roundToken.startsWith('demo_')) {
       const safe = Math.random() < 0.88;
       if (!safe) {
@@ -1685,7 +1722,6 @@ function Mines({
     hapticTap();
     setBusy(true);
 
-    // ДЕМО
     if (demoMode && setBalance && roundToken.startsWith('demo_')) {
       const reward = Math.floor(bet * multiplier);
       setBalance(prev => prev + reward);
@@ -1806,7 +1842,7 @@ function Mines({
 }
 
 /* =========================================================
-   COINFLY (с демо-режимом)
+   COINFLY
    ========================================================= */
 
 type CoinChoice = 'heads' | 'tails' | 'edge';
@@ -1843,7 +1879,6 @@ function Coinfly({
     let serverNewBalance = 0;
     let serverDelta = 0;
 
-    // ДЕМО
     if (demoMode && setBalance) {
       const winChance = Math.random() < 0.9;
       serverOutcome = winChance ? choice : (choice === 'heads' ? 'tails' : 'heads');
