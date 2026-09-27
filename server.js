@@ -109,10 +109,6 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_withdraw_status ON withdraw_requests(status, created_at DESC);
 `);
 
-try { db.exec(`ALTER TABLE users ADD COLUMN luck_phase TEXT DEFAULT 'rise'`); console.log('[migrate] ✅ luck_phase'); } catch {}
-try { db.exec(`ALTER TABLE users ADD COLUMN luck_stage INTEGER DEFAULT 0`); console.log('[migrate] ✅ luck_stage'); } catch {}
-try { db.exec(`ALTER TABLE users ADD COLUMN peak_balance INTEGER DEFAULT 0`); console.log('[migrate] ✅ peak_balance'); } catch {}
-
 function verifyInitData(initData) {
   if (!BOT_TOKEN) {
     if (!initData) return { id: 999999999, username: 'dev_user', first_name: 'Dev' };
@@ -168,39 +164,6 @@ async function editMessageReplyMarkup(chatId, messageId, replyMarkup) {
   } catch {}
 }
 
-/* =========================================================
-   LUCK PHASE — механика «почти повезло»
-   ========================================================= */
-
-function getWinChance(phase) {
-  switch (phase) {
-    case 'rise':   return 1.00;
-    case 'float':  return 0.70;
-    case 'fall':   return 0.40;
-    case 'minus':  return 0.25;
-    default:       return 1.00;
-  }
-}
-
-function updateLuckPhase(user, newBalance) {
-  let phase = user.luck_phase || 'rise';
-  let stage = user.luck_stage || 0;
-
-  if (phase === 'rise' && newBalance >= 250) {
-    phase = 'float'; stage = 0;
-  } else if (phase === 'float' && (newBalance < 150 || stage >= 5)) {
-    phase = 'fall'; stage = 0;
-  } else if (phase === 'fall' && newBalance < 80) {
-    phase = 'minus'; stage = 0;
-  } else {
-    stage += 1;
-  }
-
-  db.prepare(`UPDATE users SET luck_phase = ?, luck_stage = ? WHERE telegram_id = ?`)
-    .run(phase, stage, user.telegram_id);
-  return { phase, stage };
-}
-
 const QUESTS = [
   { id: 'bet1', name: 'Первая ставка', goal: 1, reward: 1 },
   { id: 'bet5', name: '5 ставок', goal: 5, reward: 2 },
@@ -239,8 +202,8 @@ function getOrCreateUser(tgUser) {
   const now = Date.now();
   let user = db.prepare('SELECT * FROM users WHERE telegram_id = ?').get(tgUser.id);
   if (!user) {
-    db.prepare(`INSERT INTO users (telegram_id, username, first_name, balance, total_bets, total_wins, streak, last_login, level, tickets, created_at, updated_at, luck_phase, luck_stage, peak_balance)
-      VALUES (?, ?, ?, ?, 0, 0, 0, 0, 1, 0, ?, ?, 'rise', 0, 0)`).run(tgUser.id, tgUser.username || null, tgUser.first_name || null, WELCOME_BONUS, now, now);
+    db.prepare(`INSERT INTO users (telegram_id, username, first_name, balance, total_bets, total_wins, streak, last_login, level, tickets, created_at, updated_at)
+      VALUES (?, ?, ?, ?, 0, 0, 0, 0, 1, 0, ?, ?)`).run(tgUser.id, tgUser.username || null, tgUser.first_name || null, WELCOME_BONUS, now, now);
     db.prepare(`INSERT INTO transactions (telegram_id, delta, reason, balance_after, created_at) VALUES (?, ?, ?, ?, ?)`).run(tgUser.id, WELCOME_BONUS, 'welcome_bonus', WELCOME_BONUS, now);
     addTickets(tgUser.id, WELCOME_TICKETS, 'welcome');
     user = db.prepare('SELECT * FROM users WHERE telegram_id = ?').get(tgUser.id);
@@ -530,7 +493,7 @@ app.post('/api/tickets/open', (req, res) => {
 });
 
 /* =========================================================
-   GAMES — с механикой «почти повезло»
+   GAMES — честный house edge
    ========================================================= */
 
 const BASE_SEGMENTS = [2,3,2,2,3,2,5,2,3,2,2,3,10,2,5,3,2,2,3,2,5,3,2,2,3,2,5,2,3,2,30,10,3,5,3,10,2,2,5,3];
@@ -546,24 +509,14 @@ app.post('/api/game/roulette', (req, res) => {
   const r = db.transaction(() => {
     const user = db.prepare('SELECT * FROM users WHERE telegram_id = ?').get(tgUser.id);
     if (user.balance < bet) return { error: 'insufficient funds' };
-    const phase = user.luck_phase || 'rise';
-    const winChance = getWinChance(phase);
-    let won, winner;
-    if (Math.random() < winChance) {
-      won = true;
-      winner = selected;
-    } else {
-      won = false;
-      const others = BASE_SEGMENTS.filter(s => s !== selected);
-      winner = others[crypto.randomInt(0, others.length)];
-    }
+    const winner = BASE_SEGMENTS[crypto.randomInt(0, BASE_SEGMENTS.length)];
+    const won = winner === selected;
     const reward = won ? bet * winner : 0;
     const nb = user.balance - bet + reward;
     db.prepare(`UPDATE users SET balance = ?, total_bets = total_bets + 1, total_wins = total_wins + ?, updated_at = ? WHERE telegram_id = ?`).run(nb, won?1:0, now, tgUser.id);
     db.prepare(`INSERT INTO transactions (telegram_id, delta, reason, balance_after, created_at) VALUES (?, ?, ?, ?, ?)`).run(tgUser.id, reward - bet, `roulette:x${winner}`, nb, now);
     db.prepare(`INSERT INTO history (telegram_id, game, text, amount, win, created_at) VALUES (?, ?, ?, ?, ?, ?)`).run(tgUser.id, 'Рулетка', `Выпал x${winner}`, reward - bet, won?1:0, now);
     updateQuest(tgUser.id, 'bet1'); updateQuest(tgUser.id, 'bet5'); updateQuest(tgUser.id, 'bet20');
-    updateLuckPhase(user, nb);
     if (won && reward >= 100) addLiveWin(tgUser.id, user.username, 'Рулетка', reward);
     return { winner, won, reward, newBalance: nb, delta: reward - bet };
   })();
@@ -584,16 +537,9 @@ app.post('/api/game/rocket/start', (req, res) => {
   if (!Number.isFinite(bet) || bet < 10) return res.status(400).json({ error: 'invalid bet' });
   const now = Date.now();
   const r = db.transaction(() => {
-    const user = db.prepare('SELECT * FROM users WHERE telegram_id = ?').get(tgUser.id);
+    const user = db.prepare('SELECT balance FROM users WHERE telegram_id = ?').get(tgUser.id);
     if (user.balance < bet) return { error: 'insufficient funds' };
-    const phase = user.luck_phase || 'rise';
-    const winChance = getWinChance(phase);
-    let crashPoint;
-    if (Math.random() < winChance) {
-      crashPoint = 2.5 + Math.random() * 5;
-    } else {
-      crashPoint = generateCrashPoint();
-    }
+    const crashPoint = generateCrashPoint();
     const nb = user.balance - bet;
     db.prepare(`UPDATE users SET balance = ?, total_bets = total_bets + 1, updated_at = ? WHERE telegram_id = ?`).run(nb, now, tgUser.id);
     db.prepare(`INSERT INTO transactions (telegram_id, delta, reason, balance_after, created_at) VALUES (?, ?, ?, ?, ?)`).run(tgUser.id, -bet, 'rocket:bet', nb, now);
@@ -627,7 +573,6 @@ app.post('/api/game/rocket/cashout', (req, res) => {
     db.prepare(`INSERT INTO transactions (telegram_id, delta, reason, balance_after, created_at) VALUES (?, ?, ?, ?, ?)`).run(tgUser.id, reward, `rocket:win x${multiplier}`, nb, now);
     db.prepare(`INSERT INTO history (telegram_id, game, text, amount, win, created_at) VALUES (?, ?, ?, ?, ?, ?)`).run(tgUser.id, 'Ракета', `Вывод x${multiplier.toFixed(2)}`, reward - round.bet, 1, now);
     db.prepare('DELETE FROM active_rounds WHERE token = ?').run(req.body?.roundToken);
-    updateLuckPhase(user, nb);
     if (reward >= 500) addLiveWin(tgUser.id, user.username, 'Ракета', reward);
     return { reward, newBalance: nb, delta: reward - round.bet };
   })();
@@ -740,24 +685,13 @@ app.post('/api/game/case', (req, res) => {
   const r = db.transaction(() => {
     const user = db.prepare('SELECT * FROM users WHERE telegram_id = ?').get(tgUser.id);
     if (user.balance < caseDef.price) return { error: 'insufficient funds' };
-    const phase = user.luck_phase || 'rise';
-    const winChance = getWinChance(phase);
-    let drop;
-    if (Math.random() < winChance) {
-      const profitable = caseDef.drops.filter(d => d.price > caseDef.price);
-      drop = profitable.length > 0
-        ? profitable[crypto.randomInt(0, profitable.length)]
-        : pickDropByRarity(caseDef.drops);
-    } else {
-      drop = pickDropByRarity(caseDef.drops);
-    }
+    const drop = pickDropByRarity(caseDef.drops);
     const delta = drop.price - caseDef.price;
     const nb = user.balance + delta;
     db.prepare(`UPDATE users SET balance = ?, total_bets = total_bets + 1, total_wins = total_wins + ?, updated_at = ? WHERE telegram_id = ?`).run(nb, delta >= 0 ? 1 : 0, now, tgUser.id);
     db.prepare(`INSERT INTO transactions (telegram_id, delta, reason, balance_after, created_at) VALUES (?, ?, ?, ?, ?)`).run(tgUser.id, delta, `case:${caseDef.id}`, nb, now);
     db.prepare(`INSERT INTO history (telegram_id, game, text, amount, win, created_at) VALUES (?, ?, ?, ?, ?, ?)`).run(tgUser.id, caseDef.name, `${drop.name} — ${drop.price} ⭐`, delta, delta >= 0 ? 1 : 0, now);
     updateQuest(tgUser.id, 'case3'); updateQuest(tgUser.id, 'bet1'); updateQuest(tgUser.id, 'bet5'); updateQuest(tgUser.id, 'bet20');
-    updateLuckPhase(user, nb);
     if (delta >= 500) addLiveWin(tgUser.id, user.username, caseDef.name, delta);
     return { drop, newBalance: nb, delta };
   })();
@@ -816,12 +750,9 @@ app.post('/api/game/mines/open', (req, res) => {
     const minesPositions = JSON.parse(round.mines_positions);
     const opened = JSON.parse(round.opened);
     if (opened.includes(cell)) return { error: 'already opened' };
-    const user = db.prepare('SELECT * FROM users WHERE telegram_id = ?').get(tgUser.id);
-    const phase = user.luck_phase || 'rise';
-    const winChance = getWinChance(phase);
-    const isMine = Math.random() < winChance ? false : minesPositions.includes(cell);
-    if (isMine) {
+    if (minesPositions.includes(cell)) {
       db.prepare('DELETE FROM active_mines WHERE token = ?').run(req.body?.roundToken);
+      const user = db.prepare('SELECT balance FROM users WHERE telegram_id = ?').get(tgUser.id);
       return { mine: true, cell, minePositions: minesPositions, newBalance: user.balance, delta: -round.bet };
     }
     opened.push(cell);
@@ -851,7 +782,6 @@ app.post('/api/game/mines/cashout', (req, res) => {
     db.prepare(`INSERT INTO transactions (telegram_id, delta, reason, balance_after, created_at) VALUES (?, ?, ?, ?, ?)`).run(tgUser.id, delta, `mines:win x${multiplier}`, nb, now);
     db.prepare(`INSERT INTO history (telegram_id, game, text, amount, win, created_at) VALUES (?, ?, ?, ?, ?, ?)`).run(tgUser.id, 'Сапёр', `Забрал x${multiplier.toFixed(2)}`, delta, 1, now);
     db.prepare('DELETE FROM active_mines WHERE token = ?').run(req.body?.roundToken);
-    updateLuckPhase(user, nb);
     if (reward >= 500) addLiveWin(tgUser.id, user.username, 'Сапёр', reward);
     return { reward, newBalance: nb, delta, multiplier };
   })();
@@ -860,7 +790,7 @@ app.post('/api/game/mines/cashout', (req, res) => {
 });
 
 /* =========================================================
-   COINFLY
+   COINFLY — house edge через шансы
    ========================================================= */
 
 app.post('/api/game/coinfly', (req, res) => {
@@ -873,25 +803,16 @@ app.post('/api/game/coinfly', (req, res) => {
   const r = db.transaction(() => {
     const user = db.prepare('SELECT * FROM users WHERE telegram_id = ?').get(tgUser.id);
     if (user.balance < bet) return { error: 'insufficient funds' };
-    const phase = user.luck_phase || 'rise';
-    const winChance = getWinChance(phase);
-    let won, outcome;
-    if (Math.random() < winChance) {
-      won = true;
-      outcome = req.body.choice;
-    } else {
-      won = false;
-      const others = ['heads','tails','edge'].filter(c => c !== req.body.choice);
-      outcome = others[crypto.randomInt(0, others.length)];
-    }
+    const roll = crypto.randomInt(0, 100);
+    const outcome = roll < 45 ? 'heads' : roll < 90 ? 'tails' : 'edge';
     const multipliers = { heads: 2, tails: 2, edge: 9 };
+    const won = outcome === req.body.choice;
     const reward = won ? bet * multipliers[outcome] : 0;
     const nb = user.balance - bet + reward;
     const delta = reward - bet;
     db.prepare(`UPDATE users SET balance = ?, total_bets = total_bets + 1, total_wins = total_wins + ?, updated_at = ? WHERE telegram_id = ?`).run(nb, won ? 1 : 0, now, tgUser.id);
     db.prepare(`INSERT INTO transactions (telegram_id, delta, reason, balance_after, created_at) VALUES (?, ?, ?, ?, ?)`).run(tgUser.id, delta, `coinfly:${outcome}`, nb, now);
     updateQuest(tgUser.id, 'bet1'); updateQuest(tgUser.id, 'bet5'); updateQuest(tgUser.id, 'bet20');
-    updateLuckPhase(user, nb);
     if (won && reward >= 100) addLiveWin(tgUser.id, user.username, 'Монетка', reward);
     return { outcome, won, reward, newBalance: nb, delta };
   })();
@@ -1103,10 +1024,6 @@ async function handleStartCommand(chatId, fromUser) {
   await sendTelegramMessage(chatId, text, keyboard);
 }
 
-/* =========================================================
-   TELEGRAM WEBHOOK
-   ========================================================= */
-
 app.post('/api/telegram-webhook', async (req, res) => {
   try {
     if (WEBHOOK_SECRET) {
@@ -1211,16 +1128,11 @@ app.post('/api/telegram-webhook', async (req, res) => {
             `⏳ Заявок на вывод: <b>${pendingCount}</b>`;
           await sendTelegramMessage(chatId, stats, null);
         }
-        if (text === '/reset_luck') {
-          const count = db.prepare(`UPDATE users SET balance = 45, luck_phase = 'rise', luck_stage = 0`).run().changes;
-          await sendTelegramMessage(chatId, `✅ Обнулено игроков: <b>${count}</b>`, null);
-        }
         if (text === '/help') {
           const help =
             `<b>Админ-команды</b>\n\n` +
             `/stats — статистика\n` +
             `/withdraws — активные заявки\n` +
-            `/reset_luck — обнулить всех\n` +
             `/help — эта справка`;
           await sendTelegramMessage(chatId, help, null);
         }
