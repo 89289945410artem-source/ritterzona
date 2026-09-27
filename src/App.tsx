@@ -23,7 +23,13 @@ const COLORS: Record<Multiplier, string> = { 2: '#9aa0ab', 3: '#ef4444', 5: '#3b
 const COLOR_NAMES: Record<Multiplier, string> = { 2: 'серый', 3: 'красный', 5: 'синий', 10: 'зелёный', 30: 'жёлтый' };
 const RARITY_LABEL: Record<Rarity, string> = { common: 'COMMON', uncommon: 'UNCOMMON', rare: 'RARE', epic: 'EPIC', legendary: 'LEGENDARY' };
 
-const BASE_SEGMENTS: Multiplier[] = [2,3,2,2,3,2,5,2,3,2,2,3,10,2,5,3,2,2,3,2,5,3,2,2,3,2,5,2,3,2,30,10,3,5,3,10,2,2,5,3];
+const BASE_SEGMENTS: Multiplier[] = [
+  2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
+  3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+  5, 5, 5, 5, 5, 5,
+  10, 10, 10,
+  30,
+];
 
 const CASES: GameCase[] = [
   { id: 'box', name: 'Box', price: 1, color: '#4ec97f', tagline: 'Шанс на билет',
@@ -37,91 +43,91 @@ const CASES: GameCase[] = [
     ] },
   { id: 'starter', name: 'Starter', price: 10, color: '#8b98b8', tagline: 'Первый шаг',
     drops: [
-      { id: 'st1', name: 'Rusty Coin', icon: '🪙', price: 4, color: '#c7a56b', rarity: 'common' },
-      { id: 'st2', name: 'Copper Ring', icon: '💍', price: 9, color: '#e0a35f', rarity: 'uncommon' },
-      { id: 'st3', name: 'Small Gem', icon: '🔹', price: 18, color: '#6fd2ff', rarity: 'rare' },
-      { id: 'st4', name: 'Silver Star', icon: '⭐', price: 50, color: '#c18bff', rarity: 'epic' },
-      { id: 'st5', name: 'Blue Crystal', icon: '💎', price: 150, color: '#ffd13b', rarity: 'legendary' },
+      { id: 'st1', name: 'Rusty Coin', icon: '🪙', price: 1, color: '#c7a56b', rarity: 'common' },
+      { id: 'st2', name: 'Copper Ring', icon: '💍', price: 4, color: '#e0a35f', rarity: 'uncommon' },
+      { id: 'st3', name: 'Small Gem', icon: '🔹', price: 12, color: '#6fd2ff', rarity: 'rare' },
+      { id: 'st4', name: 'Silver Star', icon: '⭐', price: 40, color: '#c18bff', rarity: 'epic' },
+      { id: 'st5', name: 'Blue Crystal', icon: '💎', price: 120, color: '#ffd13b', rarity: 'legendary' },
     ] },
   { id: 'bronze', name: 'Bronze', price: 25, color: '#c07840', tagline: 'Медный век',
     drops: [
-      { id: 'b1', name: 'Bronze Coin', icon: '🪙', price: 11, color: '#e0a35f', rarity: 'common' },
-      { id: 'b2', name: 'Bronze Star', icon: '⭐', price: 25, color: '#55b3ff', rarity: 'uncommon' },
-      { id: 'b3', name: 'Orange Crystal', icon: '🔶', price: 55, color: '#42d1ff', rarity: 'rare' },
-      { id: 'b4', name: 'Small Crown', icon: '👑', price: 180, color: '#c18bff', rarity: 'epic' },
-      { id: 'b5', name: 'Red Gem', icon: '💎', price: 550, color: '#ffd13b', rarity: 'legendary' },
+      { id: 'b1', name: 'Bronze Coin', icon: '🪙', price: 3, color: '#e0a35f', rarity: 'common' },
+      { id: 'b2', name: 'Bronze Star', icon: '⭐', price: 10, color: '#55b3ff', rarity: 'uncommon' },
+      { id: 'b3', name: 'Orange Crystal', icon: '🔶', price: 30, color: '#42d1ff', rarity: 'rare' },
+      { id: 'b4', name: 'Small Crown', icon: '👑', price: 100, color: '#c18bff', rarity: 'epic' },
+      { id: 'b5', name: 'Red Gem', icon: '💎', price: 300, color: '#ffd13b', rarity: 'legendary' },
     ] },
   { id: 'lucky', name: 'Lucky', price: 49, color: '#4ec97f', tagline: 'Удача',
     drops: [
-      { id: 'lk1', name: 'Lucky Coin', icon: '🍀', price: 22, color: '#8fd9a4', rarity: 'common' },
-      { id: 'lk2', name: 'Green Gem', icon: '💚', price: 55, color: '#55b3ff', rarity: 'uncommon' },
-      { id: 'lk3', name: 'Four Leaf', icon: '🍀', price: 120, color: '#42d1ff', rarity: 'rare' },
-      { id: 'lk4', name: 'Golden Clover', icon: '🌟', price: 350, color: '#c18bff', rarity: 'epic' },
-      { id: 'lk5', name: 'JACKPOT', icon: '💰', price: 1100, color: '#ffd13b', rarity: 'legendary' },
+      { id: 'lk1', name: 'Lucky Coin', icon: '🍀', price: 5, color: '#8fd9a4', rarity: 'common' },
+      { id: 'lk2', name: 'Green Gem', icon: '💚', price: 20, color: '#55b3ff', rarity: 'uncommon' },
+      { id: 'lk3', name: 'Four Leaf', icon: '🍀', price: 60, color: '#42d1ff', rarity: 'rare' },
+      { id: 'lk4', name: 'Golden Clover', icon: '🌟', price: 200, color: '#c18bff', rarity: 'epic' },
+      { id: 'lk5', name: 'JACKPOT', icon: '💰', price: 600, color: '#ffd13b', rarity: 'legendary' },
     ] },
   { id: 'silver', name: 'Silver', price: 100, color: '#a8b8d6', tagline: 'Серебро',
     drops: [
-      { id: 's1', name: 'Silver Coin', icon: '🪙', price: 45, color: '#d4e0f0', rarity: 'common' },
-      { id: 's2', name: 'Silver Star', icon: '🌟', price: 110, color: '#55b3ff', rarity: 'uncommon' },
-      { id: 's3', name: 'Blue Crystal', icon: '🔷', price: 250, color: '#42d1ff', rarity: 'rare' },
-      { id: 's4', name: 'Silver Crown', icon: '👑', price: 700, color: '#c18bff', rarity: 'epic' },
-      { id: 's5', name: 'Ice Gem', icon: '💎', price: 2200, color: '#ffd13b', rarity: 'legendary' },
+      { id: 's1', name: 'Silver Coin', icon: '🪙', price: 10, color: '#d4e0f0', rarity: 'common' },
+      { id: 's2', name: 'Silver Star', icon: '🌟', price: 40, color: '#55b3ff', rarity: 'uncommon' },
+      { id: 's3', name: 'Blue Crystal', icon: '🔷', price: 120, color: '#42d1ff', rarity: 'rare' },
+      { id: 's4', name: 'Silver Crown', icon: '👑', price: 400, color: '#c18bff', rarity: 'epic' },
+      { id: 's5', name: 'Ice Gem', icon: '💎', price: 1200, color: '#ffd13b', rarity: 'legendary' },
     ] },
   { id: 'gold', name: 'Gold', price: 250, color: '#ffd13b', tagline: 'Золото',
     drops: [
-      { id: 'g1', name: 'Gold Coin', icon: '🪙', price: 112, color: '#ffe071', rarity: 'common' },
-      { id: 'g2', name: 'Gold Star', icon: '🌟', price: 275, color: '#55b3ff', rarity: 'uncommon' },
-      { id: 'g3', name: 'Gold Crystal', icon: '🔶', price: 625, color: '#42d1ff', rarity: 'rare' },
-      { id: 'g4', name: 'Golden Crown', icon: '👑', price: 1750, color: '#c18bff', rarity: 'epic' },
-      { id: 'g5', name: 'Dragon Gem', icon: '🐉', price: 5600, color: '#ffd13b', rarity: 'legendary' },
+      { id: 'g1', name: 'Gold Coin', icon: '🪙', price: 25, color: '#ffe071', rarity: 'common' },
+      { id: 'g2', name: 'Gold Star', icon: '🌟', price: 100, color: '#55b3ff', rarity: 'uncommon' },
+      { id: 'g3', name: 'Gold Crystal', icon: '🔶', price: 300, color: '#42d1ff', rarity: 'rare' },
+      { id: 'g4', name: 'Golden Crown', icon: '👑', price: 1000, color: '#c18bff', rarity: 'epic' },
+      { id: 'g5', name: 'Dragon Gem', icon: '🐉', price: 3000, color: '#ffd13b', rarity: 'legendary' },
     ] },
   { id: 'platinum', name: 'Platinum', price: 500, color: '#8fd7d7', tagline: 'Платина',
     drops: [
-      { id: 'p1', name: 'Platinum Chip', icon: '💠', price: 225, color: '#b8e8e8', rarity: 'common' },
-      { id: 'p2', name: 'Platinum Star', icon: '✨', price: 550, color: '#55b3ff', rarity: 'uncommon' },
-      { id: 'p3', name: 'Frost Crystal', icon: '❄️', price: 1250, color: '#42d1ff', rarity: 'rare' },
-      { id: 'p4', name: 'Platinum Crown', icon: '👑', price: 3500, color: '#c18bff', rarity: 'epic' },
-      { id: 'p5', name: 'Frozen Heart', icon: '💎', price: 11000, color: '#ffd13b', rarity: 'legendary' },
+      { id: 'p1', name: 'Platinum Chip', icon: '💠', price: 50, color: '#b8e8e8', rarity: 'common' },
+      { id: 'p2', name: 'Platinum Star', icon: '✨', price: 200, color: '#55b3ff', rarity: 'uncommon' },
+      { id: 'p3', name: 'Frost Crystal', icon: '❄️', price: 600, color: '#42d1ff', rarity: 'rare' },
+      { id: 'p4', name: 'Platinum Crown', icon: '👑', price: 2000, color: '#c18bff', rarity: 'epic' },
+      { id: 'p5', name: 'Frozen Heart', icon: '💎', price: 6000, color: '#ffd13b', rarity: 'legendary' },
     ] },
   { id: 'diamond', name: 'Diamond', price: 1000, color: '#7fd4ff', tagline: 'Алмаз',
     drops: [
-      { id: 'd1', name: 'Diamond Chip', icon: '💎', price: 450, color: '#a8e5ff', rarity: 'common' },
-      { id: 'd2', name: 'Diamond Star', icon: '⭐', price: 1100, color: '#55b3ff', rarity: 'uncommon' },
-      { id: 'd3', name: 'Aqua Gem', icon: '🔷', price: 2500, color: '#42d1ff', rarity: 'rare' },
-      { id: 'd4', name: 'Diamond Crown', icon: '👑', price: 7000, color: '#c18bff', rarity: 'epic' },
-      { id: 'd5', name: 'Ocean Heart', icon: '💠', price: 22000, color: '#ffd13b', rarity: 'legendary' },
+      { id: 'd1', name: 'Diamond Chip', icon: '💎', price: 100, color: '#a8e5ff', rarity: 'common' },
+      { id: 'd2', name: 'Diamond Star', icon: '⭐', price: 400, color: '#55b3ff', rarity: 'uncommon' },
+      { id: 'd3', name: 'Aqua Gem', icon: '🔷', price: 1200, color: '#42d1ff', rarity: 'rare' },
+      { id: 'd4', name: 'Diamond Crown', icon: '👑', price: 4000, color: '#c18bff', rarity: 'epic' },
+      { id: 'd5', name: 'Ocean Heart', icon: '💠', price: 12000, color: '#ffd13b', rarity: 'legendary' },
     ] },
   { id: 'royal', name: 'Royal', price: 2500, color: '#b28fff', tagline: 'Королевский',
     drops: [
-      { id: 'r1', name: 'Royal Chip', icon: '🟣', price: 1125, color: '#d4bfff', rarity: 'common' },
-      { id: 'r2', name: 'Royal Star', icon: '🌟', price: 2750, color: '#55b3ff', rarity: 'uncommon' },
-      { id: 'r3', name: 'Purple Crystal', icon: '🔮', price: 6250, color: '#42d1ff', rarity: 'rare' },
-      { id: 'r4', name: 'Royal Crown', icon: '👑', price: 17500, color: '#c18bff', rarity: 'epic' },
-      { id: 'r5', name: 'King Heart', icon: '💜', price: 55000, color: '#ffd13b', rarity: 'legendary' },
+      { id: 'r1', name: 'Royal Chip', icon: '🟣', price: 250, color: '#d4bfff', rarity: 'common' },
+      { id: 'r2', name: 'Royal Star', icon: '🌟', price: 1000, color: '#55b3ff', rarity: 'uncommon' },
+      { id: 'r3', name: 'Purple Crystal', icon: '🔮', price: 3000, color: '#42d1ff', rarity: 'rare' },
+      { id: 'r4', name: 'Royal Crown', icon: '👑', price: 10000, color: '#c18bff', rarity: 'epic' },
+      { id: 'r5', name: 'King Heart', icon: '💜', price: 30000, color: '#ffd13b', rarity: 'legendary' },
     ] },
   { id: 'cosmic', name: 'Cosmic', price: 5000, color: '#7a6bff', tagline: 'Космос',
     drops: [
-      { id: 'c1', name: 'Star Dust', icon: '✨', price: 2250, color: '#b3aaff', rarity: 'common' },
-      { id: 'c2', name: 'Cosmic Gem', icon: '🌌', price: 5500, color: '#55b3ff', rarity: 'uncommon' },
-      { id: 'c3', name: 'Nebula Crystal', icon: '🌠', price: 12500, color: '#42d1ff', rarity: 'rare' },
-      { id: 'c4', name: 'Galaxy Crown', icon: '👑', price: 35000, color: '#c18bff', rarity: 'epic' },
-      { id: 'c5', name: 'Black Hole', icon: '🕳️', price: 110000, color: '#ffd13b', rarity: 'legendary' },
+      { id: 'c1', name: 'Star Dust', icon: '✨', price: 500, color: '#b3aaff', rarity: 'common' },
+      { id: 'c2', name: 'Cosmic Gem', icon: '🌌', price: 2000, color: '#55b3ff', rarity: 'uncommon' },
+      { id: 'c3', name: 'Nebula Crystal', icon: '🌠', price: 6000, color: '#42d1ff', rarity: 'rare' },
+      { id: 'c4', name: 'Galaxy Crown', icon: '👑', price: 20000, color: '#c18bff', rarity: 'epic' },
+      { id: 'c5', name: 'Black Hole', icon: '🕳️', price: 60000, color: '#ffd13b', rarity: 'legendary' },
     ] },
   { id: 'dragon', name: 'Dragon', price: 10000, color: '#ff7a3d', tagline: 'Дракон',
     drops: [
-      { id: 'dr1', name: 'Dragon Scale', icon: '🐲', price: 4500, color: '#ff9a6a', rarity: 'common' },
-      { id: 'dr2', name: 'Dragon Claw', icon: '🗡️', price: 11000, color: '#55b3ff', rarity: 'uncommon' },
-      { id: 'dr3', name: 'Dragon Eye', icon: '👁️', price: 25000, color: '#42d1ff', rarity: 'rare' },
-      { id: 'dr4', name: 'Dragon Crown', icon: '👑', price: 70000, color: '#c18bff', rarity: 'epic' },
-      { id: 'dr5', name: 'Dragon Heart', icon: '🐉', price: 220000, color: '#ffd13b', rarity: 'legendary' },
+      { id: 'dr1', name: 'Dragon Scale', icon: '🐲', price: 1000, color: '#ff9a6a', rarity: 'common' },
+      { id: 'dr2', name: 'Dragon Claw', icon: '🗡️', price: 4000, color: '#55b3ff', rarity: 'uncommon' },
+      { id: 'dr3', name: 'Dragon Eye', icon: '👁️', price: 12000, color: '#42d1ff', rarity: 'rare' },
+      { id: 'dr4', name: 'Dragon Crown', icon: '👑', price: 40000, color: '#c18bff', rarity: 'epic' },
+      { id: 'dr5', name: 'Dragon Heart', icon: '🐉', price: 120000, color: '#ffd13b', rarity: 'legendary' },
     ] },
   { id: 'legendary', name: 'Legendary', price: 25000, color: '#ffd13b', tagline: 'Легенда',
     drops: [
-      { id: 'lg1', name: 'Legend Chip', icon: '🏅', price: 11250, color: '#ffe071', rarity: 'common' },
-      { id: 'lg2', name: 'Legend Star', icon: '🌟', price: 27500, color: '#55b3ff', rarity: 'uncommon' },
-      { id: 'lg3', name: 'Legend Crystal', icon: '🔱', price: 62500, color: '#42d1ff', rarity: 'rare' },
-      { id: 'lg4', name: 'Legend Crown', icon: '👑', price: 175000, color: '#c18bff', rarity: 'epic' },
-      { id: 'lg5', name: 'GOD TIER', icon: '💎', price: 550000, color: '#ffd13b', rarity: 'legendary' },
+      { id: 'lg1', name: 'Legend Chip', icon: '🏅', price: 2500, color: '#ffe071', rarity: 'common' },
+      { id: 'lg2', name: 'Legend Star', icon: '🌟', price: 10000, color: '#55b3ff', rarity: 'uncommon' },
+      { id: 'lg3', name: 'Legend Crystal', icon: '🔱', price: 30000, color: '#42d1ff', rarity: 'rare' },
+      { id: 'lg4', name: 'Legend Crown', icon: '👑', price: 100000, color: '#c18bff', rarity: 'epic' },
+      { id: 'lg5', name: 'GOD TIER', icon: '💎', price: 300000, color: '#ffd13b', rarity: 'legendary' },
     ] },
 ];
 
@@ -158,7 +164,7 @@ function App() {
   const [topupOpen, setTopupOpen] = useState(false);
   const [topupAmount, setTopupAmount] = useState(100);
   const [topupLoading, setTopupLoading] = useState(false);
-  const [topupMethod, setTopupMethod] = useState<TopupMethod>('stars');
+  const [topupMethod, setTopupMethod] = useState<TopupMethod>('crypto');
 
   const [cryptoOpen, setCryptoOpen] = useState(false);
   const [cryptoData, setCryptoData] = useState<CryptoData | null>(null);
@@ -252,9 +258,9 @@ function App() {
           setStreak(data.profile.streak || 0);
           setTickets(data.profile.tickets || 0);
           setProfileReady(true);
-        } else { setBalance(45); setProfileReady(true); }
+        } else { setBalance(25); setProfileReady(true); }
       } catch {
-        if (!cancelled) { setBalance(45); setProfileReady(true); }
+        if (!cancelled) { setBalance(25); setProfileReady(true); }
       }
     }
     loadProfile();
@@ -369,8 +375,8 @@ function App() {
 
   const openTopup = useCallback(() => {
     hapticTap();
-    setTopupAmount(100);
-    setTopupMethod('stars');
+    setTopupAmount(50);
+    setTopupMethod('crypto');
     setTopupOpen(true);
   }, []);
 
@@ -632,13 +638,13 @@ function App() {
             <button type="button" className="modal-close" onClick={() => setTopupOpen(false)}>✕</button>
             <div className="modal-emoji">💰</div>
             <h3>Пополнить баланс</h3>
-            <p className="modal-sub">1 ⭐ = 2 ₽. Выбери способ оплаты.</p>
+            <p className="modal-sub">1 ⭐ = 2 ₽. Минимум 10 ⭐.</p>
             <div className="topup-display"><span>+</span><b>{topupAmount}</b><span>⭐</span></div>
             <div className="topup-slider">
               <input type="range" min={10} max={5000} step={10} value={topupAmount} onChange={(e) => setTopupAmount(Number(e.target.value))} />
             </div>
             <div className="topup-quick">
-              {[50, 100, 250, 500, 1000, 2500].map((v) => (
+              {[10, 50, 100, 250, 500, 1000].map((v) => (
                 <button type="button" key={v} className={topupAmount === v ? 'active' : ''} onClick={() => { hapticTap(); setTopupAmount(v); }}>{v} ⭐</button>
               ))}
             </div>
@@ -879,7 +885,7 @@ function Bonus({
       </section>
 
       <section className="bonus-card">
-        <div><small>Daily streak</small><strong>1 билет за 7 дней</strong></div>
+        <div><small>Ежедневный бонус</small><strong>+5 ⭐ каждый день</strong></div>
         <button type="button" onClick={() => { hapticTap(); onClaimBonus(); }}>Забрать</button>
       </section>
     </main>
