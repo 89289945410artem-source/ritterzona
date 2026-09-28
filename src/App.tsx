@@ -21,7 +21,7 @@ type TicketCase = { id: string; name: string; tickets: number; color: string; ta
 type TopupMethod = 'stars' | 'crypto';
 type CryptoData = { invoiceId: number; payUrl: string; amountUsdt: string; amountStars: number; amountRub: number; payload: string };
 
-const MIN_WITHDRAW = 1250;
+const MIN_WITHDRAW = 950;
 const VIP_PRICE = 500;
 const ROCKET_MIN_CASHOUT = 1.5;
 
