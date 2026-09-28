@@ -25,7 +25,7 @@ type TicketCase = { id: string; name: string; tickets: number; color: string; ta
 type TopupMethod = 'stars' | 'crypto';
 type CryptoData = { invoiceId: number; payUrl: string; amountUsdt: string; amountStars: number; amountRub: number; payload: string };
 
-const MIN_WITHDRAW = 1250;
+const MIN_WITHDRAW = 950;
 
 const COLORS: Record<Multiplier, string> = { 1.8: '#9aa0ab', 3: '#ef4444', 5: '#3b82f6', 8: '#22c55e', 20: '#f59e0b' };
 const COLOR_NAMES: Record<Multiplier, string> = { 1.8: 'серый', 3: 'красный', 5: 'синий', 8: 'зелёный', 20: 'жёлтый' };
