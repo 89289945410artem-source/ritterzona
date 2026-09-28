@@ -222,6 +222,21 @@ async function answerCallback(callbackId, text, showAlert = false) {
   } catch {}
 }
 
+async function answerPreCheckout(preCheckoutId, ok = true, errorMessage) {
+  if (!BOT_TOKEN) return;
+  try {
+    await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/answerPreCheckoutQuery`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        pre_checkout_query_id: preCheckoutId,
+        ok,
+        error_message: ok ? undefined : (errorMessage || 'Оплата не может быть завершена'),
+      }),
+    });
+  } catch (err) { console.error('[tg] answerPreCheckout error:', err); }
+}
+
 async function editMessageReplyMarkup(chatId, messageId, replyMarkup) {
   if (!BOT_TOKEN) return;
   try {
@@ -1218,6 +1233,24 @@ app.post('/api/telegram-webhook', async (req, res) => {
     }
     const update = req.body || {};
 
+    // ✅ ГЛАВНОЕ ИСПРАВЛЕНИЕ — отвечаем Telegram на pre_checkout_query
+    if (update.pre_checkout_query) {
+      const q = update.pre_checkout_query;
+      // Проверяем payload — должен начинаться с stars_
+      const payload = q.invoice_payload || '';
+      if (!payload.startsWith('stars_')) {
+        await answerPreCheckout(q.id, false, 'Неверный заказ');
+        return res.json({ ok: true });
+      }
+      const payment = db.prepare(`SELECT * FROM payments WHERE payload = ? AND status = 'pending'`).get(payload);
+      if (!payment) {
+        await answerPreCheckout(q.id, false, 'Заказ не найден');
+        return res.json({ ok: true });
+      }
+      await answerPreCheckout(q.id, true);
+      return res.json({ ok: true });
+    }
+
     const callback = update.callback_query;
     if (callback) {
       const data = callback.data || '';
@@ -1391,7 +1424,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
 async function setupTelegramWebhook() {
   if (!BOT_TOKEN || !WEBAPP_URL) return;
   const url = `${WEBAPP_URL.replace(/\/$/, '')}/api/telegram-webhook`;
-  const body = { url, allowed_updates: ['message', 'callback_query'] };
+  const body = { url, allowed_updates: ['message', 'callback_query', 'pre_checkout_query'] };
   if (WEBHOOK_SECRET) body.secret_token = WEBHOOK_SECRET;
   try {
     const r = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/setWebhook`, {
