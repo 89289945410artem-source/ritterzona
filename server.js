@@ -26,7 +26,7 @@ if (!ADMIN_ID) console.warn('⚠️ ADMIN_ID не задан');
 
 const STAR_TO_RUB = 2;
 const USDT_RUB_RATE = 100;
-const WELCOME_BONUS = 25;
+const WELCOME_BONUS = 15;
 const WELCOME_TICKETS = 1;
 const DAILY_BONUS = 1;
 const DAILY_INTERVAL_MS = 2 * 86400000;
@@ -59,7 +59,8 @@ const TURNOVER_TICKET_STEP = 500;
 const TURNOVER_BONUS_STARS = 1;
 const TURNOVER_DAILY_LIMIT = 10;
 
-const MIN_BET_SMALL = 10;
+const MIN_BET = 1;
+const MIN_BET_SMALL = 9;
 const SMALL_BET_LIMIT_PER_DAY = 15;
 
 const app = express();
@@ -197,7 +198,6 @@ function verifyInitData(initData) {
   try { return JSON.parse(params.get('user')); } catch { return null; }
 }
 
-/* TELEGRAM API */
 async function sendTelegramMessage(chatId, text, keyboard) {
   if (!BOT_TOKEN) return;
   const payload = { chat_id: chatId, text, parse_mode: 'HTML', disable_web_page_preview: true };
@@ -233,7 +233,6 @@ async function editMessageReplyMarkup(chatId, messageId, replyMarkup) {
   } catch {}
 }
 
-/* HELPERS */
 function isVip(user) {
   return user && user.vip_until && user.vip_until > Date.now();
 }
@@ -382,7 +381,6 @@ function applyDeposit(tgId, amount, source) {
   return result;
 }
 
-/* AUTH */
 app.post('/api/auth-telegram', (req, res) => {
   const tgUser = verifyInitData(req.body?.initData);
   if (!tgUser) return res.status(401).json({ error: 'invalid initData' });
@@ -428,7 +426,6 @@ function addLiveWin(tgId, username, game, amount) {
   db.prepare(`DELETE FROM live_wins WHERE id NOT IN (SELECT id FROM live_wins ORDER BY created_at DESC LIMIT 100)`).run();
 }
 
-/* BOX / DAILY / VIP */
 app.post('/api/box/open', (req, res) => {
   const tgUser = verifyInitData(req.body?.initData);
   if (!tgUser) return res.status(401).json({ error: 'invalid initData' });
@@ -535,7 +532,6 @@ app.post('/api/vip/buy', (req, res) => {
   res.json(r);
 });
 
-/* PROMO */
 app.post('/api/promo/create', (req, res) => {
   const tgUser = verifyInitData(req.body?.initData);
   if (!tgUser) return res.status(401).json({ error: 'invalid initData' });
@@ -631,7 +627,6 @@ app.post('/api/promo/users', (req, res) => {
   });
 });
 
-/* TICKETS */
 const TICKET_CASES = [
   { id: 't15', name: 'Ticket Bronze', tickets: 15, color: '#c07840', tagline: '15 билетов', minReward: 50, maxReward: 200 },
   { id: 't30', name: 'Ticket Silver', tickets: 30, color: '#a8b8d6', tagline: '30 билетов', minReward: 150, maxReward: 600 },
@@ -671,7 +666,6 @@ app.post('/api/tickets/open', (req, res) => {
   res.json(r);
 });
 
-/* ROULETTE */
 const BASE_SEGMENTS = [
   1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8,
   1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8,
@@ -686,7 +680,7 @@ app.post('/api/game/roulette', (req, res) => {
   if (!tgUser) return res.status(401).json({ error: 'invalid initData' });
   const bet = Math.floor(Number(req.body?.bet));
   const selected = Number(req.body?.selected);
-  if (!Number.isFinite(bet) || bet < 10 || bet > 1_000_000) return res.status(400).json({ error: 'invalid bet' });
+  if (!Number.isFinite(bet) || bet < MIN_BET || bet > 1_000_000) return res.status(400).json({ error: 'invalid bet' });
   if (![1.8, 3, 5, 8, 15].includes(selected)) return res.status(400).json({ error: 'invalid selected' });
 
   const smallCheck = registerSmallBet(tgUser.id, bet);
@@ -694,7 +688,7 @@ app.post('/api/game/roulette', (req, res) => {
     return res.status(400).json({
       error: 'small_bet_limit',
       limit: smallCheck.limit,
-      message: `Дневной лимит мелких ставок (${smallCheck.limit}) исчерпан. Поставь больше 10 ⭐.`,
+      message: `Дневной лимит мелких ставок (1–${MIN_BET_SMALL} ⭐, ${smallCheck.limit} шт.) исчерпан. Поставь ${MIN_BET_SMALL + 1} ⭐ или больше.`,
     });
   }
 
@@ -717,7 +711,6 @@ app.post('/api/game/roulette', (req, res) => {
   res.json(r);
 });
 
-/* ROCKET */
 function generateCrashPoint(abuseStreak) {
   const penalty = Math.min(abuseStreak * ROCKET_ABUSE_PENALTY, ROCKET_ABUSE_MAX_PENALTY);
   const instantCrashChance = ROCKET_INSTANT_CRASH_BASE + penalty;
@@ -730,14 +723,14 @@ app.post('/api/game/rocket/start', (req, res) => {
   const tgUser = verifyInitData(req.body?.initData);
   if (!tgUser) return res.status(401).json({ error: 'invalid initData' });
   const bet = Math.floor(Number(req.body?.bet));
-  if (!Number.isFinite(bet) || bet < 10 || bet > 1_000_000) return res.status(400).json({ error: 'invalid bet' });
+  if (!Number.isFinite(bet) || bet < MIN_BET || bet > 1_000_000) return res.status(400).json({ error: 'invalid bet' });
 
   const smallCheck = registerSmallBet(tgUser.id, bet);
   if (!smallCheck.ok) {
     return res.status(400).json({
       error: 'small_bet_limit',
       limit: smallCheck.limit,
-      message: `Дневной лимит мелких ставок (${smallCheck.limit}) исчерпан. Поставь больше 10 ⭐.`,
+      message: `Дневной лимит мелких ставок (1–${MIN_BET_SMALL} ⭐, ${smallCheck.limit} шт.) исчерпан. Поставь ${MIN_BET_SMALL + 1} ⭐ или больше.`,
     });
   }
 
@@ -793,7 +786,6 @@ app.post('/api/game/rocket/cashout', (req, res) => {
   res.json(r);
 });
 
-/* CASES */
 const RARITY_CHANCES = { common: 60, uncommon: 25, rare: 10, epic: 4, legendary: 1 };
 
 const CASES = [
@@ -897,7 +889,7 @@ app.post('/api/game/case', (req, res) => {
     return res.status(400).json({
       error: 'small_bet_limit',
       limit: smallCheck.limit,
-      message: `Дневной лимит мелких ставок (${smallCheck.limit}) исчерпан. Открой кейс дороже.`,
+      message: `Дневной лимит мелких ставок (1–${MIN_BET_SMALL} ⭐, ${smallCheck.limit} шт.) исчерпан. Открой кейс дороже.`,
     });
   }
 
@@ -919,7 +911,6 @@ app.post('/api/game/case', (req, res) => {
   res.json(r);
 });
 
-/* MINES */
 const MINES_MULTIPLIERS = {
   3: [0.91,0.99,1.08,1.18,1.32,1.47,1.65,1.86,2.13,2.45,2.84,3.32,3.93,4.73,5.76,7.13,9.02,11.72,15.74,22.02,32.49,51.74,96.12,213.78,668.48],
   5: [1.00,1.15,1.34,1.57,1.86,2.24,2.73,3.38,4.26,5.49,7.24,9.80,13.65,19.70,29.73,47.44,80.81,149.43,307.76,718.14,2154.42,10772.20],
@@ -932,7 +923,7 @@ app.post('/api/game/mines/start', (req, res) => {
   if (!tgUser) return res.status(401).json({ error: 'invalid initData' });
   const bet = Math.floor(Number(req.body?.bet));
   const safeMines = Math.floor(Number(req.body?.minesCount));
-  if (!Number.isFinite(bet) || bet < 10 || bet > 1_000_000) return res.status(400).json({ error: 'invalid bet' });
+  if (!Number.isFinite(bet) || bet < MIN_BET || bet > 1_000_000) return res.status(400).json({ error: 'invalid bet' });
   if (![3,5,7,10].includes(safeMines)) return res.status(400).json({ error: 'invalid mines' });
 
   const smallCheck = registerSmallBet(tgUser.id, bet);
@@ -940,7 +931,7 @@ app.post('/api/game/mines/start', (req, res) => {
     return res.status(400).json({
       error: 'small_bet_limit',
       limit: smallCheck.limit,
-      message: `Дневной лимит мелких ставок (${smallCheck.limit}) исчерпан. Поставь больше 10 ⭐.`,
+      message: `Дневной лимит мелких ставок (1–${MIN_BET_SMALL} ⭐, ${smallCheck.limit} шт.) исчерпан. Поставь ${MIN_BET_SMALL + 1} ⭐ или больше.`,
     });
   }
 
@@ -1016,12 +1007,11 @@ app.post('/api/game/mines/cashout', (req, res) => {
   res.json(r);
 });
 
-/* COINFLY */
 app.post('/api/game/coinfly', (req, res) => {
   const tgUser = verifyInitData(req.body?.initData);
   if (!tgUser) return res.status(401).json({ error: 'invalid initData' });
   const bet = Math.floor(Number(req.body?.bet));
-  if (!Number.isFinite(bet) || bet < 10 || bet > 1_000_000) return res.status(400).json({ error: 'invalid bet' });
+  if (!Number.isFinite(bet) || bet < MIN_BET || bet > 1_000_000) return res.status(400).json({ error: 'invalid bet' });
   if (!['heads','tails','edge'].includes(req.body?.choice)) return res.status(400).json({ error: 'invalid choice' });
 
   const smallCheck = registerSmallBet(tgUser.id, bet);
@@ -1029,7 +1019,7 @@ app.post('/api/game/coinfly', (req, res) => {
     return res.status(400).json({
       error: 'small_bet_limit',
       limit: smallCheck.limit,
-      message: `Дневной лимит мелких ставок (${smallCheck.limit}) исчерпан. Поставь больше 10 ⭐.`,
+      message: `Дневной лимит мелких ставок (1–${MIN_BET_SMALL} ⭐, ${smallCheck.limit} шт.) исчерпан. Поставь ${MIN_BET_SMALL + 1} ⭐ или больше.`,
     });
   }
 
@@ -1054,7 +1044,6 @@ app.post('/api/game/coinfly', (req, res) => {
   res.json(r);
 });
 
-/* WITHDRAW */
 app.post('/api/request-nft-withdraw', async (req, res) => {
   const tgUser = verifyInitData(req.body?.initData);
   if (!tgUser) return res.status(401).json({ error: 'invalid initData' });
@@ -1094,7 +1083,6 @@ app.post('/api/request-nft-withdraw', async (req, res) => {
   res.json({ ok: true, newBalance: r.newBalance, requestId: r.requestId });
 });
 
-/* CRYPTO */
 const CRYPTO_API = 'https://pay.crypt.bot/api';
 async function cryptoApiCall(method, body) {
   if (!CRYPTO_PAY_TOKEN) throw new Error('CRYPTO_PAY_TOKEN not set');
@@ -1169,7 +1157,6 @@ app.post('/api/crypto/status', (req, res) => {
   res.json({ status: payment.status, amount: payment.amount });
 });
 
-/* STARS */
 app.post('/api/create-invoice', async (req, res) => {
   const tgUser = verifyInitData(req.body?.initData);
   if (!tgUser) return res.status(401).json({ error: 'invalid initData' });
@@ -1192,8 +1179,8 @@ app.post('/api/create-invoice', async (req, res) => {
       body: JSON.stringify({
         title: `Пополнение ${amount} ⭐`,
         description: isFirst
-          ? `Первый депозит +${FIRST_DEPOSIT_BONUS_PERCENT}% бонус${isVip(getOrCreateUser(tgUser)) ? ` + VIP +${VIP_DEPOSIT_BONUS_PERCENT}%` : ''}`
-          : (isVip(getOrCreateUser(tgUser)) ? `VIP +${VIP_DEPOSIT_BONUS_PERCENT}% бонус` : `Зачислим ${amount} звёзд`),
+          ? `Первый депозит +${FIRST_DEPOSIT_BONUS_PERCENT}%`
+          : `Зачислим ${amount} звёзд`,
         payload, currency: 'XTR',
         prices: [{ label: `${amount} ⭐`, amount }],
       }),
@@ -1215,8 +1202,8 @@ async function handleStartCommand(chatId, fromUser) {
     `▫️ <b>+${WELCOME_TICKETS} билет</b>\n` +
     `▫️ <b>+${FIRST_DEPOSIT_BONUS_PERCENT}%</b> на первый депозит\n` +
     `▫️ <b>VIP-подписка</b> за ${VIP_PRICE} ⭐ — <b>+${VIP_DEPOSIT_BONUS_PERCENT}%</b> к пополнениям\n\n` +
-    `🎯 Каждая ставка = оборот. За каждые ${TURNOVER_TICKET_STEP} ⭐ оборота — билет + ⭐.\n` +
-    `🎲 Не более ${SMALL_BET_LIMIT_PER_DAY} мелких ставок (≤10 ⭐) в день.\n\n` +
+    `🎯 Ставки от <b>${MIN_BET} ⭐</b>. Не более ${SMALL_BET_LIMIT_PER_DAY} мелких (1–${MIN_BET_SMALL} ⭐) в день.\n` +
+    `🔄 За каждые ${TURNOVER_TICKET_STEP} ⭐ оборота — билет + ⭐.\n\n` +
     `👇 <b>Твой шанс на крупный выигрыш:</b>`;
   const keyboard = WEBAPP_URL
     ? { inline_keyboard: [[{ text: '🚀 Открыть RITTERZONA', web_app: { url: WEBAPP_URL } }]] }
@@ -1306,8 +1293,71 @@ app.post('/api/telegram-webhook', async (req, res) => {
             `⏳ Заявок: <b>${pendingCount}</b>`;
           await sendTelegramMessage(chatId, stats, null);
         }
+        if (text.startsWith('/give')) {
+          const parts = text.split(/\s+/);
+          if (parts.length < 3) {
+            await sendTelegramMessage(chatId, 'Формат: <code>/give 123456789 5000 bonus</code>', null);
+            return res.json({ ok: true });
+          }
+          const targetId = Number(parts[1]);
+          const amount = Math.floor(Number(parts[2]));
+          const reason = parts[3] || 'admin_grant';
+          if (!Number.isFinite(targetId) || !Number.isFinite(amount) || amount === 0) {
+            await sendTelegramMessage(chatId, '❌ Неверные параметры', null);
+            return res.json({ ok: true });
+          }
+          const target = db.prepare('SELECT telegram_id, balance, first_name, username FROM users WHERE telegram_id = ?').get(targetId);
+          if (!target) {
+            await sendTelegramMessage(chatId, `❌ Игрок <code>${targetId}</code> не найден`, null);
+            return res.json({ ok: true });
+          }
+          const now = Date.now();
+          const nb = target.balance + amount;
+          db.prepare(`UPDATE users SET balance = ?, updated_at = ? WHERE telegram_id = ?`).run(nb, now, targetId);
+          db.prepare(`INSERT INTO transactions (telegram_id, delta, reason, balance_after, created_at) VALUES (?, ?, ?, ?, ?)`)
+            .run(targetId, amount, reason, nb, now);
+          await sendTelegramMessage(chatId,
+            `✅ Начислено <b>${amount} ⭐</b>\n👤 ${target.first_name || 'игрок'}${target.username ? ` (@${target.username})` : ''}\n🆔 <code>${targetId}</code>\n💰 Новый баланс: <b>${nb} ⭐</b>`,
+            null);
+          try {
+            await sendTelegramMessage(targetId, `🎁 Тебе начислено <b>${amount} ⭐</b>\n💰 Баланс: <b>${nb} ⭐</b>`, null);
+          } catch {}
+          return res.json({ ok: true });
+        }
+        if (text.startsWith('/take')) {
+          const parts = text.split(/\s+/);
+          if (parts.length < 3) {
+            await sendTelegramMessage(chatId, 'Формат: <code>/take 123456789 500</code>', null);
+            return res.json({ ok: true });
+          }
+          const targetId = Number(parts[1]);
+          const amount = Math.floor(Number(parts[2]));
+          const reason = parts[3] || 'admin_take';
+          if (!Number.isFinite(targetId) || !Number.isFinite(amount) || amount <= 0) {
+            await sendTelegramMessage(chatId, '❌ Неверные параметры', null);
+            return res.json({ ok: true });
+          }
+          const target = db.prepare('SELECT telegram_id, balance FROM users WHERE telegram_id = ?').get(targetId);
+          if (!target) {
+            await sendTelegramMessage(chatId, `❌ Игрок <code>${targetId}</code> не найден`, null);
+            return res.json({ ok: true });
+          }
+          const now = Date.now();
+          const nb = Math.max(0, target.balance - amount);
+          db.prepare(`UPDATE users SET balance = ?, updated_at = ? WHERE telegram_id = ?`).run(nb, now, targetId);
+          db.prepare(`INSERT INTO transactions (telegram_id, delta, reason, balance_after, created_at) VALUES (?, ?, ?, ?, ?)`)
+            .run(targetId, -amount, reason, nb, now);
+          await sendTelegramMessage(chatId, `✅ Списано <b>${amount} ⭐</b> у <code>${targetId}</code>\n💰 Баланс: <b>${nb} ⭐</b>`, null);
+          return res.json({ ok: true });
+        }
         if (text === '/help') {
-          await sendTelegramMessage(chatId, `<b>Админ-команды</b>\n\n/stats\n/withdraws\n/help`, null);
+          await sendTelegramMessage(chatId,
+            `<b>Админ-команды</b>\n\n` +
+            `/stats — статистика\n` +
+            `/withdraws — заявки\n` +
+            `/give ID СУММА [причина] — начислить\n` +
+            `/take ID СУММА [причина] — списать\n` +
+            `/help — справка`, null);
         }
       }
 
@@ -1367,8 +1417,9 @@ app.listen(PORT, async () => {
   console.log(`   Welcome: ${WELCOME_BONUS} ⭐ + ${WELCOME_TICKETS} 🎟`);
   console.log(`   First deposit: +${FIRST_DEPOSIT_BONUS_PERCENT}%`);
   console.log(`   VIP: ${VIP_PRICE} ⭐ / ${VIP_DURATION_MS / 86400000} дн, +${VIP_DEPOSIT_BONUS_PERCENT}% к пополнениям`);
+  console.log(`   Bet min: ${MIN_BET} ⭐, small limit: ${SMALL_BET_LIMIT_PER_DAY}/день (${MIN_BET}–${MIN_BET_SMALL} ⭐)`);
   console.log(`   Turnover: ${TURNOVER_TICKET_STEP} ⭐ = +1 🎟 + ${TURNOVER_BONUS_STARS} ⭐ (${TURNOVER_DAILY_LIMIT}/день)`);
-  console.log(`   Small bets: ${SMALL_BET_LIMIT_PER_DAY}/день (ставки ≤ ${MIN_BET_SMALL} ⭐)`);
   console.log(`   Rocket: min x${ROCKET_MIN_CASHOUT}, crash ${ROCKET_INSTANT_CRASH_BASE}% +${ROCKET_ABUSE_PENALTY}%/кэшаут`);
+  console.log(`   Admin: /give ID СУММА, /take ID СУММА`);
   await setupTelegramWebhook();
 });

@@ -187,8 +187,6 @@ function App() {
   const toastTimerRef = useRef<number | null>(null);
   const cryptoTimerRef = useRef<number | null>(null);
 
-  /* -------- СИНХРОНИЗАЦИЯ БАЛАНСА -------- */
-
   const syncBalance = useCallback(async () => {
     const initData = window.Telegram?.WebApp?.initData || '';
     try {
@@ -791,8 +789,6 @@ function App() {
   );
 }
 
-/* ============== HOME ============== */
-
 function Home({
   balance, history, liveWins, level, streak, totalBets, vip, smallBetsRemaining,
   setPage, onTopup, onNftWithdraw, onBonus, onVip,
@@ -862,7 +858,7 @@ function Home({
       </section>
 
       <section className="bonus-card" style={{ borderColor: 'rgba(245,158,11,0.4)' }}>
-        <div><small>🎲 Мелкие ставки</small><strong>Осталось {smallBetsRemaining}/15 сегодня</strong></div>
+        <div><small>🎲 Мелкие ставки (1–9 ⭐)</small><strong>Осталось {smallBetsRemaining}/15 сегодня</strong></div>
       </section>
 
       <section className="withdraw-card">
@@ -901,8 +897,6 @@ function Home({
   );
 }
 
-/* ============== BONUS ============== */
-
 function Bonus({
   tickets, onPromo, onClaimBonus, onTickets, setPage,
 }: {
@@ -938,8 +932,6 @@ function Bonus({
     </main>
   );
 }
-
-/* ============== VIP ============== */
 
 function Vip({
   vip, vipUntil, onBuy, setPage, balance,
@@ -981,8 +973,6 @@ function Vip({
   );
 }
 
-/* ============== ROULETTE ============== */
-
 function Roulette({
   balance, setBalance, demoMode, setPage, showToast,
 }: {
@@ -1023,7 +1013,7 @@ function Roulette({
   const startSpin = async () => {
     if (spinning) return;
     hapticTap();
-    const safeBet = Math.max(10, Math.floor(Number(bet) || 10));
+    const safeBet = Math.max(1, Math.floor(Number(bet) || 1));
     if (balance < safeBet) { hapticError(); showToast('Недостаточно ⭐'); return; }
 
     let winnerMultiplier: Multiplier | null = null;
@@ -1149,14 +1139,12 @@ function Roulette({
 
       <div className="selected-text">Ставка на <b style={{ color: COLORS[selected] }}>{COLOR_NAMES[selected]}</b>{' · '}x{selected}</div>
 
-      <button type="button" className="primary-button full" disabled={spinning || balance < Math.max(10, bet)} onClick={startSpin}>
-        {spinning ? 'Колесо крутится...' : `Запустить за ${Math.max(10, bet)} ⭐`}
+      <button type="button" className="primary-button full" disabled={spinning || balance < Math.max(1, bet)} onClick={startSpin}>
+        {spinning ? 'Колесо крутится...' : `Запустить за ${Math.max(1, bet)} ⭐`}
       </button>
     </main>
   );
 }
-
-/* ============== ROCKET ============== */
 
 function Rocket({
   balance, setBalance, demoMode, setPage, showToast,
@@ -1200,7 +1188,7 @@ function Rocket({
   const startRocket = async () => {
     if (playingRef.current || playing) return;
     hapticTap();
-    const safeBet = Math.max(10, Math.floor(Number(bet) || 10));
+    const safeBet = Math.max(1, Math.floor(Number(bet) || 1));
 
     let crashPoint = 1;
     let newBalance = 0;
@@ -1351,7 +1339,7 @@ function Rocket({
         <p>Мин. вывод x{ROCKET_MIN_CASHOUT.toFixed(2)}. Защита от абьюза активна.</p>
       </div>
       <button type="button" className="primary-button full rocket-start-btn" onClick={playing ? cashOut : startRocket}>
-        {playing ? (canCashOut ? `Забрать ${payout} ⭐` : `Ждём x${ROCKET_MIN_CASHOUT.toFixed(2)}...`) : `Запустить за ${Math.max(10, bet)} ⭐`}
+        {playing ? (canCashOut ? `Забрать ${payout} ⭐` : `Ждём x${ROCKET_MIN_CASHOUT.toFixed(2)}...`) : `Запустить за ${Math.max(1, bet)} ⭐`}
       </button>
       <section className="rocket-box">
         <div className="rocket-multiplier">x{multiplier.toFixed(2)}</div>
@@ -1370,8 +1358,6 @@ function Rocket({
     </main>
   );
 }
-
-/* ============== CASES ============== */
 
 function Cases({
   balance, setBalance, demoMode, vip, setPage, showToast,
@@ -1653,8 +1639,6 @@ function Cases({
   );
 }
 
-/* ============== MINES ============== */
-
 function Mines({
   balance, setBalance, demoMode, setPage, showToast,
 }: {
@@ -1682,7 +1666,7 @@ function Mines({
 
   const startGame = async () => {
     if (busy) return;
-    const safeBet = Math.max(10, Math.floor(Number(bet) || 10));
+    const safeBet = Math.max(1, Math.floor(Number(bet) || 1));
     hapticTap();
     setBusy(true);
 
@@ -1806,7 +1790,7 @@ function Mines({
             </div>
             <BetBox bet={bet} setBet={setBet} disabled={false} balance={balance} />
             <button type="button" className="primary-button full" disabled={busy} onClick={startGame}>
-              {busy ? 'Запуск...' : `Начать за ${Math.max(10, bet)} ⭐`}
+              {busy ? 'Запуск...' : `Начать за ${Math.max(1, bet)} ⭐`}
             </button>
           </div>
         )}
@@ -1846,8 +1830,6 @@ function Mines({
   );
 }
 
-/* ============== COINFLY ============== */
-
 type CoinChoice = 'heads' | 'tails' | 'edge';
 
 function Coinfly({
@@ -1868,7 +1850,7 @@ function Coinfly({
 
   const startFlip = async () => {
     if (busy || flipping) return;
-    const safeBet = Math.max(10, Math.floor(Number(bet) || 10));
+    const safeBet = Math.max(1, Math.floor(Number(bet) || 1));
     if (balance < safeBet) { hapticError(); showToast('Недостаточно ⭐'); return; }
     hapticTap(); setBusy(true); setOutcome(null); setWon(null);
 
@@ -1973,15 +1955,13 @@ function Coinfly({
       </div>
 
       <button type="button" className="primary-button full"
-        disabled={flipping || busy || balance < Math.max(10, bet)}
+        disabled={flipping || busy || balance < Math.max(1, bet)}
         onClick={startFlip}>
-        {flipping || busy ? 'Подбрасываем...' : `Подбросить за ${Math.max(10, bet)} ⭐`}
+        {flipping || busy ? 'Подбрасываем...' : `Подбросить за ${Math.max(1, bet)} ⭐`}
       </button>
     </main>
   );
 }
-
-/* ============== TICKETS ============== */
 
 function Tickets({
   tickets, cases, opening, onOpen, setPage,
@@ -2030,15 +2010,13 @@ function Tickets({
   );
 }
 
-/* ============== BET BOX ============== */
-
 function BetBox({ bet, setBet, disabled, balance }: {
   bet: number;
   setBet: (value: number) => void;
   disabled: boolean;
   balance: number;
 }) {
-  const MIN_BET = 10;
+  const MIN_BET = 1;
   const [inputValue, setInputValue] = useState(String(bet));
 
   useEffect(() => { setInputValue(String(bet)); }, [bet]);
@@ -2056,17 +2034,17 @@ function BetBox({ bet, setBet, disabled, balance }: {
       <div className="bet-header"><span>Ставка</span><b>{bet} ⭐</b></div>
       <div className="bet-input-row">
         <button type="button" className="bet-step" disabled={disabled || bet <= MIN_BET}
-          onClick={() => { hapticTap(); const next = Math.max(MIN_BET, bet - 10); setBet(next); setInputValue(String(next)); }}>−</button>
+          onClick={() => { hapticTap(); const next = Math.max(MIN_BET, bet - 1); setBet(next); setInputValue(String(next)); }}>−</button>
         <input type="text" inputMode="numeric" pattern="[0-9]*" value={inputValue} disabled={disabled}
           onChange={(e) => { const raw = e.target.value.replace(/[^0-9]/g, ''); setInputValue(raw); }}
           onBlur={(e) => commitValue(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') { commitValue((e.target as HTMLInputElement).value); (e.target as HTMLInputElement).blur(); } }} />
         <button type="button" className="bet-step" disabled={disabled}
-          onClick={() => { hapticTap(); const next = bet + 10; setBet(next); setInputValue(String(next)); }}>+</button>
+          onClick={() => { hapticTap(); const next = bet + 1; setBet(next); setInputValue(String(next)); }}>+</button>
       </div>
       <div className="bet-hint">Мин: {MIN_BET} ⭐ · Баланс: {balance} ⭐</div>
       <div className="quick-bets">
-        {[10, 50, 100, 500].map((value) => (
+        {[1, 5, 10, 50, 100, 500].map((value) => (
           <button type="button" key={value} disabled={disabled || value > balance}
             className={bet === value ? 'active' : ''}
             onClick={() => { hapticTap(); const next = Math.max(MIN_BET, value); setBet(next); setInputValue(String(next)); }}>{value}</button>
@@ -2081,8 +2059,6 @@ function BetBox({ bet, setBet, disabled, balance }: {
     </section>
   );
 }
-
-/* ============== SHARED ============== */
 
 function BackButton({ setPage }: { setPage: (page: Page) => void }) {
   return (
