@@ -24,17 +24,47 @@ if (!WEBAPP_URL) console.warn('⚠️ WEBAPP_URL не задан');
 if (!CRYPTO_PAY_TOKEN) console.warn('⚠️ CRYPTO_PAY_TOKEN не задан');
 if (!ADMIN_ID) console.warn('⚠️ ADMIN_ID не задан');
 
+/* =========================================================
+   ЭКОНОМИКА
+   ========================================================= */
+
 const STAR_TO_RUB = 2;
 const USDT_RUB_RATE = 100;
-const WELCOME_BONUS = 15;
+const WELCOME_BONUS = 5;
 const WELCOME_TICKETS = 1;
 const DAILY_BONUS = 1;
+const DAILY_INTERVAL_MS = 2 * 86400000;
 const DAILY_TICKET_EVERY = 7;
 const PROMO_INVITER_TICKETS = 1;
 const PROMO_ACTIVATOR_BONUS = 5;
 const PROMO_MAX_USES = 1000;
 const BOX_PRICE = 1;
 const MIN_WITHDRAW = 1250;
+
+// Первый депозит — не ×2, а +10% (мягкий онбординг, не убивает экономику)
+const FIRST_DEPOSIT_BONUS_PERCENT = 10;
+
+// VIP
+const VIP_PRICE = 500;
+const VIP_DURATION_MS = 30 * 86400000;
+const VIP_DAILY_MULT = 2;
+const VIP_CASE_DISCOUNT = 0.10;
+
+// Рефералка
+const REFERRAL_PERCENT = 0.05;
+const REFERRAL_BIG_THRESHOLD = 5000;
+
+// Ракета — защита от абьюза
+const ROCKET_INSTANT_CRASH_BASE = 25;
+const ROCKET_MIN_CASHOUT = 1.5;
+const ROCKET_ABUSE_PENALTY = 5;
+const ROCKET_ABUSE_MAX_PENALTY = 35;
+const ROCKET_ABUSE_HIGH_MULT = 2.0;
+
+// Оборот — бонус за активную игру
+const TURNOVER_TICKET_STEP = 500;   // каждые 500 ⭐ оборота = +1 билет
+const TURNOVER_BONUS_STARS = 1;     // и +1 ⭐
+const TURNOVER_DAILY_LIMIT = 10;    // максимум 10 награждений в день
 
 const app = express();
 app.use(express.json({ limit: '100kb' }));
@@ -48,7 +78,14 @@ db.exec(`
     balance INTEGER NOT NULL DEFAULT 0, total_bets INTEGER NOT NULL DEFAULT 0,
     total_wins INTEGER NOT NULL DEFAULT 0, streak INTEGER NOT NULL DEFAULT 0,
     last_login INTEGER NOT NULL DEFAULT 0, level INTEGER NOT NULL DEFAULT 1,
-    tickets INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+    tickets INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+    vip_until INTEGER NOT NULL DEFAULT 0,
+    cashout_streak INTEGER NOT NULL DEFAULT 0,
+    total_deposited INTEGER NOT NULL DEFAULT 0,
+    total_turnover INTEGER NOT NULL DEFAULT 0,
+    today_turnover INTEGER NOT NULL DEFAULT 0,
+    today_turnover_day INTEGER NOT NULL DEFAULT 0,
+    today_turnover_rewards INTEGER NOT NULL DEFAULT 0
   );
   CREATE TABLE IF NOT EXISTS history (
     id INTEGER PRIMARY KEY AUTOINCREMENT, telegram_id INTEGER NOT NULL,
@@ -94,7 +131,8 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT, telegram_id INTEGER NOT NULL,
     amount INTEGER NOT NULL, method TEXT NOT NULL DEFAULT 'stars',
     payload TEXT UNIQUE, invoice_id TEXT, status TEXT NOT NULL DEFAULT 'pending',
-    created_at INTEGER NOT NULL, paid_at INTEGER
+    created_at INTEGER NOT NULL, paid_at INTEGER,
+    is_first INTEGER NOT NULL DEFAULT 0
   );
   CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(telegram_id, created_at DESC);
   CREATE TABLE IF NOT EXISTS withdraw_requests (
@@ -103,7 +141,37 @@ db.exec(`
     created_at INTEGER NOT NULL, processed_at INTEGER
   );
   CREATE INDEX IF NOT EXISTS idx_withdraw_status ON withdraw_requests(status, created_at DESC);
+  CREATE TABLE IF NOT EXISTS referrals (
+    telegram_id INTEGER PRIMARY KEY, referrer_id INTEGER NOT NULL, created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_referrals_referrer ON referrals(referrer_id);
+  CREATE TABLE IF NOT EXISTS referral_earnings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, referrer_id INTEGER NOT NULL,
+    referral_id INTEGER NOT NULL, amount INTEGER NOT NULL, source TEXT,
+    created_at INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS vip_purchases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, telegram_id INTEGER NOT NULL,
+    amount INTEGER NOT NULL, until INTEGER NOT NULL, created_at INTEGER NOT NULL
+  );
 `);
+
+function ensureColumn(table, column, definition) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all();
+  if (!cols.some((c) => c.name === column)) {
+    db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`).run();
+    console.log(`[migrate] ✅ ${table}.${column}`);
+  }
+}
+
+ensureColumn('users', 'vip_until',                 'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('users', 'cashout_streak',            'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('users', 'total_deposited',           'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('users', 'total_turnover',            'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('users', 'today_turnover',            'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('users', 'today_turnover_day',        'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('users', 'today_turnover_rewards',    'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('payments', 'is_first',               'INTEGER NOT NULL DEFAULT 0');
 
 function verifyInitData(initData) {
   if (!BOT_TOKEN) {
@@ -116,14 +184,18 @@ function verifyInitData(initData) {
   const hash = params.get('hash');
   if (!hash) return null;
   params.delete('hash');
-  const dataCheckString = [...params.entries()].map(([k, v]) => `${k}=${v}`).sort().join('\n');
-  const secretKey = crypto.createHmac('sha256', 'WebAppData').update(BOT_TOKEN).digest();
-  const calcHash = crypto.createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
-  if (calcHash !== hash) return null;
+  const dcs = [...params.entries()].map(([k, v]) => `${k}=${v}`).sort().join('\n');
+  const secret = crypto.createHmac('sha256', 'WebAppData').update(BOT_TOKEN).digest();
+  const calc = crypto.createHmac('sha256', secret).update(dcs).digest('hex');
+  if (calc !== hash) return null;
   const authDate = Number(params.get('auth_date') || 0);
   if (Date.now() / 1000 - authDate > 86400) return null;
   try { return JSON.parse(params.get('user')); } catch { return null; }
 }
+
+/* =========================================================
+   TELEGRAM API
+   ========================================================= */
 
 async function sendTelegramMessage(chatId, text, keyboard) {
   if (!BOT_TOKEN) return;
@@ -160,6 +232,18 @@ async function editMessageReplyMarkup(chatId, messageId, replyMarkup) {
   } catch {}
 }
 
+/* =========================================================
+   ХЕЛПЕРЫ
+   ========================================================= */
+
+function isVip(user) {
+  return user && user.vip_until && user.vip_until > Date.now();
+}
+
+function todayKey() {
+  return Math.floor(Date.now() / 86400000);
+}
+
 function addTickets(tgId, amount, reason) {
   if (amount <= 0) return;
   const now = Date.now();
@@ -172,12 +256,61 @@ function addTickets(tgId, amount, reason) {
   })();
 }
 
+/**
+ * Начисляет оборот игроку и даёт бонусы за каждые TURNOVER_TICKET_STEP ⭐.
+ * Вызывать внутри той же транзакции, что списывает/начисляет ставку.
+ */
+function registerTurnover(tgId, amount) {
+  if (amount <= 0) return;
+  const now = Date.now();
+  const today = todayKey();
+  const user = db.prepare('SELECT * FROM users WHERE telegram_id = ?').get(tgId);
+  if (!user) return;
+
+  let todayTurnover = user.today_turnover || 0;
+  let todayDay = user.today_turnover_day || 0;
+  let todayRewards = user.today_turnover_rewards || 0;
+
+  if (todayDay !== today) {
+    todayTurnover = 0;
+    todayRewards = 0;
+    todayDay = today;
+  }
+
+  const prevTotal = user.total_turnover || 0;
+  const newTotal = prevTotal + amount;
+  const newToday = todayTurnover + amount;
+
+  // Сколько новых «порогов» перешагнули?
+  const prevThresholds = Math.floor(prevTotal / TURNOVER_TICKET_STEP);
+  const newThresholds = Math.floor(newTotal / TURNOVER_TICKET_STEP);
+  let rewards = newThresholds - prevThresholds;
+
+  // Ограничение в день
+  if (todayRewards + rewards > TURNOVER_DAILY_LIMIT) {
+    rewards = Math.max(0, TURNOVER_DAILY_LIMIT - todayRewards);
+  }
+
+  const totalTurnoverUpdate = newTotal;
+  let newBalance = user.balance;
+
+  if (rewards > 0) {
+    newBalance += rewards * TURNOVER_BONUS_STARS;
+    addTickets(tgId, rewards, `turnover_bonus_${rewards}`);
+    db.prepare(`INSERT INTO transactions (telegram_id, delta, reason, balance_after, created_at) VALUES (?, ?, ?, ?, ?)`)
+      .run(tgId, rewards * TURNOVER_BONUS_STARS, `turnover_bonus_${rewards}`, newBalance, now);
+  }
+
+  db.prepare(`UPDATE users SET total_turnover = ?, today_turnover = ?, today_turnover_day = ?, today_turnover_rewards = ?, balance = ?, updated_at = ? WHERE telegram_id = ?`)
+    .run(totalTurnoverUpdate, newToday, todayDay, todayRewards + rewards, newBalance, now, tgId);
+}
+
 function getOrCreateUser(tgUser) {
   const now = Date.now();
   let user = db.prepare('SELECT * FROM users WHERE telegram_id = ?').get(tgUser.id);
   if (!user) {
-    db.prepare(`INSERT INTO users (telegram_id, username, first_name, balance, total_bets, total_wins, streak, last_login, level, tickets, created_at, updated_at)
-      VALUES (?, ?, ?, ?, 0, 0, 0, 0, 1, 0, ?, ?)`).run(tgUser.id, tgUser.username || null, tgUser.first_name || null, WELCOME_BONUS, now, now);
+    db.prepare(`INSERT INTO users (telegram_id, username, first_name, balance, total_bets, total_wins, streak, last_login, level, tickets, vip_until, cashout_streak, total_deposited, total_turnover, today_turnover, today_turnover_day, today_turnover_rewards, created_at, updated_at)
+      VALUES (?, ?, ?, ?, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, ?, ?)`).run(tgUser.id, tgUser.username || null, tgUser.first_name || null, WELCOME_BONUS, now, now);
     db.prepare(`INSERT INTO transactions (telegram_id, delta, reason, balance_after, created_at) VALUES (?, ?, ?, ?, ?)`).run(tgUser.id, WELCOME_BONUS, 'welcome_bonus', WELCOME_BONUS, now);
     addTickets(tgUser.id, WELCOME_TICKETS, 'welcome');
     user = db.prepare('SELECT * FROM users WHERE telegram_id = ?').get(tgUser.id);
@@ -199,15 +332,64 @@ function creditBalance(tgId, amount, reason) {
   })();
 }
 
+function applyReferralCut(depositorId, amount, source) {
+  const ref = db.prepare(`SELECT referrer_id FROM referrals WHERE telegram_id = ?`).get(depositorId);
+  if (!ref) return;
+  const referrer = db.prepare(`SELECT total_deposited FROM users WHERE telegram_id = ?`).get(ref.referrer_id);
+  if (!referrer || referrer.total_deposited < REFERRAL_BIG_THRESHOLD) return;
+  const cut = Math.floor(amount * REFERRAL_PERCENT);
+  if (cut <= 0) return;
+  const now = Date.now();
+  db.transaction(() => {
+    const r = db.prepare('SELECT balance FROM users WHERE telegram_id = ?').get(ref.referrer_id);
+    if (!r) return;
+    const nb = r.balance + cut;
+    db.prepare(`UPDATE users SET balance = ?, updated_at = ? WHERE telegram_id = ?`).run(nb, now, ref.referrer_id);
+    db.prepare(`INSERT INTO transactions (telegram_id, delta, reason, balance_after, created_at) VALUES (?, ?, ?, ?, ?)`).run(ref.referrer_id, cut, `referral:${source}`, nb, now);
+    db.prepare(`INSERT INTO referral_earnings (referrer_id, referral_id, amount, source, created_at) VALUES (?, ?, ?, ?, ?)`).run(ref.referrer_id, depositorId, cut, source, now);
+  })();
+}
+
+/**
+ * Зачисление депозита. Первый депозит — не ×2, а +10% (мягкий онбординг).
+ */
+function applyDeposit(tgId, amount, source) {
+  const now = Date.now();
+  const result = db.transaction(() => {
+    const user = db.prepare('SELECT * FROM users WHERE telegram_id = ?').get(tgId);
+    if (!user) return null;
+    const paidCount = db.prepare(`SELECT COUNT(*) AS c FROM payments WHERE telegram_id = ? AND status = 'paid'`).get(tgId).c;
+    const isFirst = paidCount <= 1;   // только что провели оплату → уже 1
+    const bonus = isFirst ? Math.floor(amount * FIRST_DEPOSIT_BONUS_PERCENT / 100) : 0;
+    const total = amount + bonus;
+    const nb = user.balance + total;
+    const newDeposited = (user.total_deposited || 0) + amount;
+    db.prepare(`UPDATE users SET balance = ?, total_deposited = ?, updated_at = ? WHERE telegram_id = ?`).run(nb, newDeposited, now, tgId);
+    db.prepare(`INSERT INTO transactions (telegram_id, delta, reason, balance_after, created_at) VALUES (?, ?, ?, ?, ?)`).run(tgId, total, source + (isFirst ? '_first' : ''), nb, now);
+    return { newBalance: nb, bonus, isFirst, deposited: newDeposited };
+  })();
+  if (result) applyReferralCut(tgId, amount, result.isFirst ? 'first_deposit' : 'deposit');
+  return result;
+}
+
 /* =========================================================
-   AUTH + HISTORY + LIVE WINS
+   AUTH
    ========================================================= */
 
 app.post('/api/auth-telegram', (req, res) => {
   const tgUser = verifyInitData(req.body?.initData);
   if (!tgUser) return res.status(401).json({ error: 'invalid initData' });
   const user = getOrCreateUser(tgUser);
-  res.json({ profile: { telegramId: user.telegram_id, username: user.username, firstName: user.first_name, balance: user.balance, level: user.level, streak: user.streak, totalBets: user.total_bets, tickets: user.tickets || 0 } });
+  const vip = isVip(user);
+  res.json({ profile: {
+    telegramId: user.telegram_id, username: user.username, firstName: user.first_name,
+    balance: user.balance, level: user.level, streak: user.streak, totalBets: user.total_bets,
+    tickets: user.tickets || 0,
+    vip, vipUntil: user.vip_until || 0,
+    totalDeposited: user.total_deposited || 0,
+    totalTurnover: user.total_turnover || 0,
+    todayTurnover: user.today_turnover_day === todayKey() ? (user.today_turnover || 0) : 0,
+  }});
 });
 
 app.post('/api/history/add', (req, res) => {
@@ -236,7 +418,7 @@ function addLiveWin(tgId, username, game, amount) {
 }
 
 /* =========================================================
-   BOX / DAILY
+   BOX / DAILY / VIP
    ========================================================= */
 
 app.post('/api/box/open', (req, res) => {
@@ -249,19 +431,25 @@ app.post('/api/box/open', (req, res) => {
     let nb = user.balance - BOX_PRICE;
     db.prepare(`UPDATE users SET balance = ?, updated_at = ? WHERE telegram_id = ?`).run(nb, now, tgUser.id);
     db.prepare(`INSERT INTO transactions (telegram_id, delta, reason, balance_after, created_at) VALUES (?, ?, ?, ?, ?)`).run(tgUser.id, -BOX_PRICE, 'box_open', nb, now);
+    registerTurnover(tgUser.id, BOX_PRICE);
+
+    const vip = isVip(user);
+    const ticketChance = vip ? 4 : 2;
+    const refundChance = vip ? 18 : 12;
+
     const roll = crypto.randomInt(0, 10000) / 100;
-    if (roll < 2) {
+    if (roll < ticketChance) {
       addTickets(tgUser.id, 1, 'box_ticket');
       return { ok: true, type: 'ticket', reward: 0, message: '🎟 Билет!', newBalance: nb };
     }
-    if (roll < 12) {
-      const refund = 2 + crypto.randomInt(0, 4);
+    if (roll < refundChance) {
+      const refund = 1 + crypto.randomInt(0, 2);
       nb += refund;
       db.prepare(`UPDATE users SET balance = ? WHERE telegram_id = ?`).run(nb, tgUser.id);
       db.prepare(`INSERT INTO transactions (telegram_id, delta, reason, balance_after, created_at) VALUES (?, ?, ?, ?, ?)`).run(tgUser.id, refund, 'box_refund', nb, now);
       return { ok: true, type: 'refund', reward: refund, message: `+${refund} ⭐`, newBalance: nb };
     }
-    return { ok: true, type: 'redirect', reward: 0, message: 'Иди в Сапёр 💣', game: 'mines', newBalance: nb };
+    return { ok: true, type: 'redirect', reward: 0, message: 'Пусто', game: 'mines', newBalance: nb };
   })();
   if (r.error) return res.status(400).json(r);
   res.json(r);
@@ -273,28 +461,67 @@ app.post('/api/daily-bonus', (req, res) => {
   const now = Date.now();
   const user = db.prepare('SELECT * FROM users WHERE telegram_id = ?').get(tgUser.id);
   if (!user) return res.status(400).json({ error: 'user not found' });
-  const dayMs = 86400000;
-  const lastBonus = db.prepare(`SELECT created_at FROM transactions WHERE telegram_id = ? AND reason = 'daily_bonus' ORDER BY created_at DESC LIMIT 1`).get(tgUser.id);
-  if (lastBonus && now - lastBonus.created_at < dayMs) return res.status(400).json({ error: 'already_claimed', nextAt: lastBonus.created_at + dayMs });
-  let newStreak = 1;
-  if (user.last_login && now - user.last_login < 2 * dayMs) newStreak = Math.min((user.streak||0)+1, 30);
 
-  const newBalance = user.balance + DAILY_BONUS;
+  const lastBonus = db.prepare(`SELECT created_at FROM transactions WHERE telegram_id = ? AND reason = 'daily_bonus' ORDER BY created_at DESC LIMIT 1`).get(tgUser.id);
+  if (lastBonus && now - lastBonus.created_at < DAILY_INTERVAL_MS) {
+    return res.status(400).json({ error: 'already_claimed', nextAt: lastBonus.created_at + DAILY_INTERVAL_MS });
+  }
+
+  let newStreak = 1;
+  const dayMs = 86400000;
+  if (user.last_login && now - user.last_login < 3 * dayMs) newStreak = Math.min((user.streak||0)+1, 30);
+
+  const vip = isVip(user);
+  const dailyAmount = vip ? DAILY_BONUS * VIP_DAILY_MULT : DAILY_BONUS;
+
+  const newBalance = user.balance + dailyAmount;
   let ticketsGiven = 0;
-  if (newStreak % DAILY_TICKET_EVERY === 0) { ticketsGiven = 1; addTickets(tgUser.id, 1, `daily_streak_day${newStreak}`); }
+  if (newStreak % DAILY_TICKET_EVERY === 0) {
+    ticketsGiven = 1;
+    addTickets(tgUser.id, 1, `daily_streak_day${newStreak}`);
+  }
 
   db.prepare(`UPDATE users SET balance = ?, streak = ?, last_login = ?, updated_at = ? WHERE telegram_id = ?`)
     .run(newBalance, newStreak, now, now, tgUser.id);
   db.prepare(`INSERT INTO transactions (telegram_id, delta, reason, balance_after, created_at) VALUES (?, ?, ?, ?, ?)`)
-    .run(tgUser.id, DAILY_BONUS, 'daily_bonus', newBalance, now);
+    .run(tgUser.id, dailyAmount, 'daily_bonus', newBalance, now);
 
   res.json({
     balance: newBalance,
-    bonus: DAILY_BONUS,
+    bonus: dailyAmount,
     streak: newStreak,
     ticketsGiven,
-    message: `🔥 Streak ${newStreak} · +${DAILY_BONUS} ⭐`,
+    vip,
+    message: `${vip ? '👑 VIP · ' : ''}🔥 Streak ${newStreak} · +${dailyAmount} ⭐`,
   });
+});
+
+app.post('/api/vip/status', (req, res) => {
+  const tgUser = verifyInitData(req.body?.initData);
+  if (!tgUser) return res.status(401).json({ error: 'invalid initData' });
+  const user = db.prepare('SELECT vip_until FROM users WHERE telegram_id = ?').get(tgUser.id);
+  const vip = user && user.vip_until > Date.now();
+  res.json({ vip, vipUntil: user?.vip_until || 0, price: VIP_PRICE });
+});
+
+app.post('/api/vip/buy', (req, res) => {
+  const tgUser = verifyInitData(req.body?.initData);
+  if (!tgUser) return res.status(401).json({ error: 'invalid initData' });
+  const now = Date.now();
+  const r = db.transaction(() => {
+    const user = db.prepare('SELECT * FROM users WHERE telegram_id = ?').get(tgUser.id);
+    if (!user) return { error: 'user not found' };
+    if (user.balance < VIP_PRICE) return { error: 'insufficient_funds' };
+    const base = Math.max(user.vip_until || 0, now);
+    const until = base + VIP_DURATION_MS;
+    const nb = user.balance - VIP_PRICE;
+    db.prepare(`UPDATE users SET balance = ?, vip_until = ?, updated_at = ? WHERE telegram_id = ?`).run(nb, until, now, tgUser.id);
+    db.prepare(`INSERT INTO transactions (telegram_id, delta, reason, balance_after, created_at) VALUES (?, ?, ?, ?, ?)`).run(tgUser.id, -VIP_PRICE, 'vip_purchase', nb, now);
+    db.prepare(`INSERT INTO vip_purchases (telegram_id, amount, until, created_at) VALUES (?, ?, ?, ?)`).run(tgUser.id, VIP_PRICE, until, now);
+    return { ok: true, newBalance: nb, vipUntil: until };
+  })();
+  if (r.error) return res.status(400).json(r);
+  res.json(r);
 });
 
 /* =========================================================
@@ -327,19 +554,15 @@ app.post('/api/promo/list', (req, res) => {
     SELECT p.code, p.created_at,
       (SELECT COUNT(*) FROM promo_uses WHERE code = p.code) AS uses_count,
       (SELECT COUNT(DISTINCT user_id) FROM promo_uses WHERE code = p.code) AS unique_users
-    FROM promocodes p
-    WHERE p.owner_id = ?
-    ORDER BY p.created_at DESC
-    LIMIT 50
+    FROM promocodes p WHERE p.owner_id = ?
+    ORDER BY p.created_at DESC LIMIT 50
   `).all(tgUser.id);
   const user = db.prepare('SELECT tickets FROM users WHERE telegram_id = ?').get(tgUser.id);
   res.json({
     tickets: user?.tickets || 0,
     codes: rows.map(r => ({
-      code: r.code,
-      createdAt: r.created_at,
-      usesCount: r.uses_count || 0,
-      uniqueUsers: r.unique_users || 0,
+      code: r.code, createdAt: r.created_at,
+      usesCount: r.uses_count || 0, uniqueUsers: r.unique_users || 0,
       maxUses: PROMO_MAX_USES,
     })),
   });
@@ -358,8 +581,8 @@ app.post('/api/promo/redeem', (req, res) => {
   if (uses >= PROMO_MAX_USES) return res.status(400).json({ error: 'limit_reached' });
 
   const user = db.prepare('SELECT username, first_name FROM users WHERE telegram_id = ?').get(tgUser.id);
-
   const now = Date.now();
+
   db.transaction(() => {
     db.prepare(`INSERT INTO promo_uses (code, user_id, username, first_name, used_at) VALUES (?, ?, ?, ?, ?)`)
       .run(code, tgUser.id, user?.username || null, user?.first_name || null, now);
@@ -371,7 +594,12 @@ app.post('/api/promo/redeem', (req, res) => {
       db.prepare(`INSERT INTO transactions (telegram_id, delta, reason, balance_after, created_at) VALUES (?, ?, ?, ?, ?)`).run(tgUser.id, PROMO_ACTIVATOR_BONUS, `promo:${code}`, nb, now);
     }
     addTickets(promo.owner_id, PROMO_INVITER_TICKETS, `promo:${code}`);
+    const existing = db.prepare(`SELECT 1 FROM referrals WHERE telegram_id = ?`).get(tgUser.id);
+    if (!existing && promo.owner_id !== tgUser.id) {
+      db.prepare(`INSERT INTO referrals (telegram_id, referrer_id, created_at) VALUES (?, ?, ?)`).run(tgUser.id, promo.owner_id, now);
+    }
   })();
+
   res.json({ ok: true, reward: PROMO_ACTIVATOR_BONUS, message: `Промокод активирован! +${PROMO_ACTIVATOR_BONUS} ⭐` });
 });
 
@@ -380,27 +608,14 @@ app.post('/api/promo/users', (req, res) => {
   if (!tgUser) return res.status(401).json({ error: 'invalid initData' });
   const code = String(req.body?.code || '').trim().toUpperCase();
   if (!code) return res.status(400).json({ error: 'empty' });
-
   const promo = db.prepare(`SELECT * FROM promocodes WHERE code = ? AND owner_id = ?`).get(code, tgUser.id);
   if (!promo) return res.status(403).json({ error: 'forbidden' });
-
   const uses = db.prepare(`
-    SELECT user_id, username, first_name, used_at
-    FROM promo_uses
-    WHERE code = ?
-    ORDER BY used_at DESC
-    LIMIT 500
+    SELECT user_id, username, first_name, used_at FROM promo_uses WHERE code = ? ORDER BY used_at DESC LIMIT 500
   `).all(code);
-
   res.json({
-    code,
-    totalUses: uses.length,
-    users: uses.map(u => ({
-      userId: u.user_id,
-      username: u.username,
-      firstName: u.first_name,
-      usedAt: u.used_at,
-    })),
+    code, totalUses: uses.length,
+    users: uses.map(u => ({ userId: u.user_id, username: u.username, firstName: u.first_name, usedAt: u.used_at })),
   });
 });
 
@@ -448,16 +663,17 @@ app.post('/api/tickets/open', (req, res) => {
 });
 
 /* =========================================================
-   ROULETTE
+   ROULETTE — RTP ~65%
    ========================================================= */
 
 const BASE_SEGMENTS = [
   1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8,
   1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8,
+  1.8, 1.8,
   3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
   5, 5, 5, 5, 5,
-  8, 8, 8,
-  20, 20,
+  8, 8,
+  15,
 ];
 
 app.post('/api/game/roulette', (req, res) => {
@@ -466,7 +682,7 @@ app.post('/api/game/roulette', (req, res) => {
   const bet = Math.floor(Number(req.body?.bet));
   const selected = Number(req.body?.selected);
   if (!Number.isFinite(bet) || bet < 10) return res.status(400).json({ error: 'invalid bet' });
-  if (![1.8, 3, 5, 8, 20].includes(selected)) return res.status(400).json({ error: 'invalid selected' });
+  if (![1.8, 3, 5, 8, 15].includes(selected)) return res.status(400).json({ error: 'invalid selected' });
   const now = Date.now();
   const r = db.transaction(() => {
     const user = db.prepare('SELECT * FROM users WHERE telegram_id = ?').get(tgUser.id);
@@ -478,6 +694,7 @@ app.post('/api/game/roulette', (req, res) => {
     db.prepare(`UPDATE users SET balance = ?, total_bets = total_bets + 1, total_wins = total_wins + ?, updated_at = ? WHERE telegram_id = ?`).run(nb, won?1:0, now, tgUser.id);
     db.prepare(`INSERT INTO transactions (telegram_id, delta, reason, balance_after, created_at) VALUES (?, ?, ?, ?, ?)`).run(tgUser.id, reward - bet, `roulette:x${winner}`, nb, now);
     db.prepare(`INSERT INTO history (telegram_id, game, text, amount, win, created_at) VALUES (?, ?, ?, ?, ?, ?)`).run(tgUser.id, 'Рулетка', `Выпал x${winner}`, reward - bet, won?1:0, now);
+    registerTurnover(tgUser.id, bet);
     if (won && reward >= 100) addLiveWin(tgUser.id, user.username, 'Рулетка', reward);
     return { winner, won, reward, newBalance: nb, delta: reward - bet };
   })();
@@ -486,11 +703,13 @@ app.post('/api/game/roulette', (req, res) => {
 });
 
 /* =========================================================
-   ROCKET
+   ROCKET — защита от абьюза
    ========================================================= */
 
-function generateCrashPoint() {
-  if (crypto.randomInt(0, 100) < 12) return 1.0;
+function generateCrashPoint(abuseStreak) {
+  const penalty = Math.min(abuseStreak * ROCKET_ABUSE_PENALTY, ROCKET_ABUSE_MAX_PENALTY);
+  const instantCrashChance = ROCKET_INSTANT_CRASH_BASE + penalty;
+  if (crypto.randomInt(0, 100) < instantCrashChance) return 1.0;
   const r = crypto.randomInt(1, 1000000) / 1000000;
   return Math.min(Math.max(Number((1 + Math.pow(r, 3) * 16).toFixed(2)), 1.3), 100);
 }
@@ -502,12 +721,13 @@ app.post('/api/game/rocket/start', (req, res) => {
   if (!Number.isFinite(bet) || bet < 10) return res.status(400).json({ error: 'invalid bet' });
   const now = Date.now();
   const r = db.transaction(() => {
-    const user = db.prepare('SELECT balance FROM users WHERE telegram_id = ?').get(tgUser.id);
+    const user = db.prepare('SELECT * FROM users WHERE telegram_id = ?').get(tgUser.id);
     if (user.balance < bet) return { error: 'insufficient funds' };
-    const crashPoint = generateCrashPoint();
+    const crashPoint = generateCrashPoint(user.cashout_streak || 0);
     const nb = user.balance - bet;
     db.prepare(`UPDATE users SET balance = ?, total_bets = total_bets + 1, updated_at = ? WHERE telegram_id = ?`).run(nb, now, tgUser.id);
     db.prepare(`INSERT INTO transactions (telegram_id, delta, reason, balance_after, created_at) VALUES (?, ?, ?, ?, ?)`).run(tgUser.id, -bet, 'rocket:bet', nb, now);
+    registerTurnover(tgUser.id, bet);
     return { crashPoint, newBalance: nb };
   })();
   if (r.error) return res.status(400).json(r);
@@ -520,7 +740,9 @@ app.post('/api/game/rocket/cashout', (req, res) => {
   const tgUser = verifyInitData(req.body?.initData);
   if (!tgUser) return res.status(401).json({ error: 'invalid initData' });
   const multiplier = Number(req.body?.multiplier);
-  if (!Number.isFinite(multiplier) || multiplier < 1.3) return res.status(400).json({ error: 'multiplier too low' });
+  if (!Number.isFinite(multiplier) || multiplier < ROCKET_MIN_CASHOUT) {
+    return res.status(400).json({ error: 'multiplier too low', min: ROCKET_MIN_CASHOUT });
+  }
   const now = Date.now();
   const r = db.transaction(() => {
     const round = db.prepare(`SELECT * FROM active_rounds WHERE token = ? AND telegram_id = ?`).get(req.body?.roundToken, tgUser.id);
@@ -533,100 +755,105 @@ app.post('/api/game/rocket/cashout', (req, res) => {
     const reward = Math.floor(round.bet * multiplier);
     const user = db.prepare('SELECT * FROM users WHERE telegram_id = ?').get(tgUser.id);
     const nb = user.balance + reward;
-    db.prepare(`UPDATE users SET balance = ?, total_wins = total_wins + 1, updated_at = ? WHERE telegram_id = ?`).run(nb, now, tgUser.id);
+
+    let newStreak = user.cashout_streak || 0;
+    if (multiplier < ROCKET_ABUSE_HIGH_MULT) newStreak = Math.min(newStreak + 1, 20);
+    else newStreak = 0;
+
+    db.prepare(`UPDATE users SET balance = ?, total_wins = total_wins + 1, cashout_streak = ?, updated_at = ? WHERE telegram_id = ?`).run(nb, newStreak, now, tgUser.id);
     db.prepare(`INSERT INTO transactions (telegram_id, delta, reason, balance_after, created_at) VALUES (?, ?, ?, ?, ?)`).run(tgUser.id, reward, `rocket:win x${multiplier}`, nb, now);
     db.prepare(`INSERT INTO history (telegram_id, game, text, amount, win, created_at) VALUES (?, ?, ?, ?, ?, ?)`).run(tgUser.id, 'Ракета', `Вывод x${multiplier.toFixed(2)}`, reward - round.bet, 1, now);
     db.prepare('DELETE FROM active_rounds WHERE token = ?').run(req.body?.roundToken);
     if (reward >= 500) addLiveWin(tgUser.id, user.username, 'Ракета', reward);
-    return { reward, newBalance: nb, delta: reward - round.bet };
+    return { reward, newBalance: nb, delta: reward - round.bet, abuseStreak: newStreak };
   })();
   if (r.error) return res.status(400).json(r);
   res.json(r);
 });
 
 /* =========================================================
-   CASES
+   CASES — RTP ~78%
    ========================================================= */
 
-const RARITY_CHANCES = { common: 55, uncommon: 25, rare: 12, epic: 5, legendary: 3 };
+const RARITY_CHANCES = { common: 60, uncommon: 25, rare: 10, epic: 4, legendary: 1 };
 
 const CASES = [
   { id: 'starter', name: 'Starter', price: 10, drops: [
-    { name: 'Rusty Coin', icon: '🪙', price: 1, rarity: 'common' },
-    { name: 'Copper Ring', icon: '💍', price: 4, rarity: 'uncommon' },
-    { name: 'Small Gem', icon: '🔹', price: 12, rarity: 'rare' },
-    { name: 'Silver Star', icon: '⭐', price: 40, rarity: 'epic' },
-    { name: 'Blue Crystal', icon: '💎', price: 120, rarity: 'legendary' },
+    { name: 'Rusty Coin', icon: '🪙', price: 2, rarity: 'common' },
+    { name: 'Copper Ring', icon: '💍', price: 6, rarity: 'uncommon' },
+    { name: 'Small Gem', icon: '🔹', price: 15, rarity: 'rare' },
+    { name: 'Silver Star', icon: '⭐', price: 50, rarity: 'epic' },
+    { name: 'Blue Crystal', icon: '💎', price: 150, rarity: 'legendary' },
   ]},
   { id: 'bronze', name: 'Bronze', price: 25, drops: [
-    { name: 'Bronze Coin', icon: '🪙', price: 3, rarity: 'common' },
-    { name: 'Bronze Star', icon: '⭐', price: 10, rarity: 'uncommon' },
-    { name: 'Orange Crystal', icon: '🔶', price: 30, rarity: 'rare' },
-    { name: 'Small Crown', icon: '👑', price: 100, rarity: 'epic' },
-    { name: 'Red Gem', icon: '💎', price: 300, rarity: 'legendary' },
+    { name: 'Bronze Coin', icon: '🪙', price: 5, rarity: 'common' },
+    { name: 'Bronze Star', icon: '⭐', price: 15, rarity: 'uncommon' },
+    { name: 'Orange Crystal', icon: '🔶', price: 40, rarity: 'rare' },
+    { name: 'Small Crown', icon: '👑', price: 120, rarity: 'epic' },
+    { name: 'Red Gem', icon: '💎', price: 400, rarity: 'legendary' },
   ]},
   { id: 'lucky', name: 'Lucky', price: 49, drops: [
-    { name: 'Lucky Coin', icon: '🍀', price: 5, rarity: 'common' },
-    { name: 'Green Gem', icon: '💚', price: 20, rarity: 'uncommon' },
-    { name: 'Four Leaf', icon: '🍀', price: 60, rarity: 'rare' },
-    { name: 'Golden Clover', icon: '🌟', price: 200, rarity: 'epic' },
-    { name: 'JACKPOT', icon: '💰', price: 600, rarity: 'legendary' },
+    { name: 'Lucky Coin', icon: '🍀', price: 10, rarity: 'common' },
+    { name: 'Green Gem', icon: '💚', price: 30, rarity: 'uncommon' },
+    { name: 'Four Leaf', icon: '🍀', price: 75, rarity: 'rare' },
+    { name: 'Golden Clover', icon: '🌟', price: 240, rarity: 'epic' },
+    { name: 'JACKPOT', icon: '💰', price: 750, rarity: 'legendary' },
   ]},
   { id: 'silver', name: 'Silver', price: 100, drops: [
-    { name: 'Silver Coin', icon: '🪙', price: 10, rarity: 'common' },
-    { name: 'Silver Star', icon: '🌟', price: 40, rarity: 'uncommon' },
-    { name: 'Blue Crystal', icon: '🔷', price: 120, rarity: 'rare' },
-    { name: 'Silver Crown', icon: '👑', price: 400, rarity: 'epic' },
-    { name: 'Ice Gem', icon: '💎', price: 1200, rarity: 'legendary' },
+    { name: 'Silver Coin', icon: '🪙', price: 20, rarity: 'common' },
+    { name: 'Silver Star', icon: '🌟', price: 60, rarity: 'uncommon' },
+    { name: 'Blue Crystal', icon: '🔷', price: 150, rarity: 'rare' },
+    { name: 'Silver Crown', icon: '👑', price: 500, rarity: 'epic' },
+    { name: 'Ice Gem', icon: '💎', price: 1500, rarity: 'legendary' },
   ]},
   { id: 'gold', name: 'Gold', price: 250, drops: [
-    { name: 'Gold Coin', icon: '🪙', price: 25, rarity: 'common' },
-    { name: 'Gold Star', icon: '🌟', price: 100, rarity: 'uncommon' },
-    { name: 'Gold Crystal', icon: '🔶', price: 300, rarity: 'rare' },
-    { name: 'Golden Crown', icon: '👑', price: 1000, rarity: 'epic' },
-    { name: 'Dragon Gem', icon: '🐉', price: 3000, rarity: 'legendary' },
+    { name: 'Gold Coin', icon: '🪙', price: 50, rarity: 'common' },
+    { name: 'Gold Star', icon: '🌟', price: 150, rarity: 'uncommon' },
+    { name: 'Gold Crystal', icon: '🔶', price: 400, rarity: 'rare' },
+    { name: 'Golden Crown', icon: '👑', price: 1200, rarity: 'epic' },
+    { name: 'Dragon Gem', icon: '🐉', price: 4000, rarity: 'legendary' },
   ]},
   { id: 'platinum', name: 'Platinum', price: 500, drops: [
-    { name: 'Platinum Chip', icon: '💠', price: 50, rarity: 'common' },
-    { name: 'Platinum Star', icon: '✨', price: 200, rarity: 'uncommon' },
-    { name: 'Frost Crystal', icon: '❄️', price: 600, rarity: 'rare' },
-    { name: 'Platinum Crown', icon: '👑', price: 2000, rarity: 'epic' },
-    { name: 'Frozen Heart', icon: '💎', price: 6000, rarity: 'legendary' },
+    { name: 'Platinum Chip', icon: '💠', price: 100, rarity: 'common' },
+    { name: 'Platinum Star', icon: '✨', price: 300, rarity: 'uncommon' },
+    { name: 'Frost Crystal', icon: '❄️', price: 800, rarity: 'rare' },
+    { name: 'Platinum Crown', icon: '👑', price: 2400, rarity: 'epic' },
+    { name: 'Frozen Heart', icon: '💎', price: 8000, rarity: 'legendary' },
   ]},
   { id: 'diamond', name: 'Diamond', price: 1000, drops: [
-    { name: 'Diamond Chip', icon: '💎', price: 100, rarity: 'common' },
-    { name: 'Diamond Star', icon: '⭐', price: 400, rarity: 'uncommon' },
-    { name: 'Aqua Gem', icon: '🔷', price: 1200, rarity: 'rare' },
-    { name: 'Diamond Crown', icon: '👑', price: 4000, rarity: 'epic' },
-    { name: 'Ocean Heart', icon: '💠', price: 12000, rarity: 'legendary' },
+    { name: 'Diamond Chip', icon: '💎', price: 200, rarity: 'common' },
+    { name: 'Diamond Star', icon: '⭐', price: 600, rarity: 'uncommon' },
+    { name: 'Aqua Gem', icon: '🔷', price: 1500, rarity: 'rare' },
+    { name: 'Diamond Crown', icon: '👑', price: 5000, rarity: 'epic' },
+    { name: 'Ocean Heart', icon: '💠', price: 15000, rarity: 'legendary' },
   ]},
   { id: 'royal', name: 'Royal', price: 2500, drops: [
-    { name: 'Royal Chip', icon: '🟣', price: 250, rarity: 'common' },
-    { name: 'Royal Star', icon: '🌟', price: 1000, rarity: 'uncommon' },
-    { name: 'Purple Crystal', icon: '🔮', price: 3000, rarity: 'rare' },
-    { name: 'Royal Crown', icon: '👑', price: 10000, rarity: 'epic' },
-    { name: 'King Heart', icon: '💜', price: 30000, rarity: 'legendary' },
+    { name: 'Royal Chip', icon: '🟣', price: 500, rarity: 'common' },
+    { name: 'Royal Star', icon: '🌟', price: 1500, rarity: 'uncommon' },
+    { name: 'Purple Crystal', icon: '🔮', price: 4000, rarity: 'rare' },
+    { name: 'Royal Crown', icon: '👑', price: 12000, rarity: 'epic' },
+    { name: 'King Heart', icon: '💜', price: 40000, rarity: 'legendary' },
   ]},
   { id: 'cosmic', name: 'Cosmic', price: 5000, drops: [
-    { name: 'Star Dust', icon: '✨', price: 500, rarity: 'common' },
-    { name: 'Cosmic Gem', icon: '🌌', price: 2000, rarity: 'uncommon' },
-    { name: 'Nebula Crystal', icon: '🌠', price: 6000, rarity: 'rare' },
-    { name: 'Galaxy Crown', icon: '👑', price: 20000, rarity: 'epic' },
-    { name: 'Black Hole', icon: '🕳️', price: 60000, rarity: 'legendary' },
+    { name: 'Star Dust', icon: '✨', price: 1000, rarity: 'common' },
+    { name: 'Cosmic Gem', icon: '🌌', price: 3000, rarity: 'uncommon' },
+    { name: 'Nebula Crystal', icon: '🌠', price: 8000, rarity: 'rare' },
+    { name: 'Galaxy Crown', icon: '👑', price: 24000, rarity: 'epic' },
+    { name: 'Black Hole', icon: '🕳️', price: 80000, rarity: 'legendary' },
   ]},
   { id: 'dragon', name: 'Dragon', price: 10000, drops: [
-    { name: 'Dragon Scale', icon: '🐲', price: 1000, rarity: 'common' },
-    { name: 'Dragon Claw', icon: '🗡️', price: 4000, rarity: 'uncommon' },
-    { name: 'Dragon Eye', icon: '👁️', price: 12000, rarity: 'rare' },
-    { name: 'Dragon Crown', icon: '👑', price: 40000, rarity: 'epic' },
-    { name: 'Dragon Heart', icon: '🐉', price: 120000, rarity: 'legendary' },
+    { name: 'Dragon Scale', icon: '🐲', price: 2000, rarity: 'common' },
+    { name: 'Dragon Claw', icon: '🗡️', price: 6000, rarity: 'uncommon' },
+    { name: 'Dragon Eye', icon: '👁️', price: 15000, rarity: 'rare' },
+    { name: 'Dragon Crown', icon: '👑', price: 50000, rarity: 'epic' },
+    { name: 'Dragon Heart', icon: '🐉', price: 150000, rarity: 'legendary' },
   ]},
   { id: 'legendary', name: 'Legendary', price: 25000, drops: [
-    { name: 'Legend Chip', icon: '🏅', price: 2500, rarity: 'common' },
-    { name: 'Legend Star', icon: '🌟', price: 10000, rarity: 'uncommon' },
-    { name: 'Legend Crystal', icon: '🔱', price: 30000, rarity: 'rare' },
-    { name: 'Legend Crown', icon: '👑', price: 100000, rarity: 'epic' },
-    { name: 'GOD TIER', icon: '💎', price: 300000, rarity: 'legendary' },
+    { name: 'Legend Chip', icon: '🏅', price: 5000, rarity: 'common' },
+    { name: 'Legend Star', icon: '🌟', price: 15000, rarity: 'uncommon' },
+    { name: 'Legend Crystal', icon: '🔱', price: 40000, rarity: 'rare' },
+    { name: 'Legend Crown', icon: '👑', price: 120000, rarity: 'epic' },
+    { name: 'GOD TIER', icon: '💎', price: 400000, rarity: 'legendary' },
   ]},
 ];
 
@@ -655,6 +882,7 @@ app.post('/api/game/case', (req, res) => {
     db.prepare(`UPDATE users SET balance = ?, total_bets = total_bets + 1, total_wins = total_wins + ?, updated_at = ? WHERE telegram_id = ?`).run(nb, delta >= 0 ? 1 : 0, now, tgUser.id);
     db.prepare(`INSERT INTO transactions (telegram_id, delta, reason, balance_after, created_at) VALUES (?, ?, ?, ?, ?)`).run(tgUser.id, delta, `case:${caseDef.id}`, nb, now);
     db.prepare(`INSERT INTO history (telegram_id, game, text, amount, win, created_at) VALUES (?, ?, ?, ?, ?, ?)`).run(tgUser.id, caseDef.name, `${drop.name} — ${drop.price} ⭐`, delta, delta >= 0 ? 1 : 0, now);
+    registerTurnover(tgUser.id, caseDef.price);
     if (delta >= 500) addLiveWin(tgUser.id, user.username, caseDef.name, delta);
     return { drop, newBalance: nb, delta };
   })();
@@ -663,14 +891,14 @@ app.post('/api/game/case', (req, res) => {
 });
 
 /* =========================================================
-   MINES
+   MINES — RTP 80%
    ========================================================= */
 
 const MINES_MULTIPLIERS = {
-  3: [1.02,1.11,1.21,1.33,1.48,1.65,1.85,2.09,2.39,2.75,3.19,3.73,4.42,5.31,6.47,8.01,10.13,13.17,17.68,24.74,36.51,58.14,108.0,240.2,751.1],
-  5: [1.12,1.29,1.5,1.76,2.09,2.52,3.07,3.8,4.79,6.17,8.13,11.01,15.34,22.13,33.4,53.3,90.8,167.9,345.8,806.9,2420.7,12103.6],
-  7: [1.24,1.51,1.86,2.32,2.96,3.85,5.12,6.98,9.75,14.03,20.89,32.3,52.25,89.38,163.8,327.7,737.2,1966.2,6982.2,52366.6],
-  10: [1.49,1.96,2.64,3.66,5.22,7.7,11.79,18.87,31.84,57.3,110.81,232.08,533.7,1402.2,4365.5,17462.0,104772.0,1047720.0],
+  3: [0.91,0.99,1.08,1.18,1.32,1.47,1.65,1.86,2.13,2.45,2.84,3.32,3.93,4.73,5.76,7.13,9.02,11.72,15.74,22.02,32.49,51.74,96.12,213.78,668.48],
+  5: [1.00,1.15,1.34,1.57,1.86,2.24,2.73,3.38,4.26,5.49,7.24,9.80,13.65,19.70,29.73,47.44,80.81,149.43,307.76,718.14,2154.42,10772.20],
+  7: [1.10,1.34,1.66,2.07,2.63,3.43,4.56,6.21,8.68,12.49,18.59,28.75,46.50,79.55,145.78,291.65,656.11,1749.92,6214.16,46606.27],
+  10: [1.33,1.74,2.35,3.26,4.65,6.85,10.49,16.79,28.34,51.00,98.62,206.55,475.00,1247.96,3885.30,15541.18,93247.08,932470.80],
 };
 
 app.post('/api/game/mines/start', (req, res) => {
@@ -695,6 +923,7 @@ app.post('/api/game/mines/start', (req, res) => {
     db.prepare(`UPDATE users SET balance = ?, total_bets = total_bets + 1, updated_at = ? WHERE telegram_id = ?`).run(nb, now, tgUser.id);
     db.prepare(`INSERT INTO transactions (telegram_id, delta, reason, balance_after, created_at) VALUES (?, ?, ?, ?, ?)`).run(tgUser.id, -bet, 'mines:bet', nb, now);
     db.prepare(`INSERT INTO active_mines (token, telegram_id, bet, mines, mines_positions, opened, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`).run(roundToken, tgUser.id, bet, safeMines, JSON.stringify(minesPositions), '[]', now);
+    registerTurnover(tgUser.id, bet);
     return { roundToken, newBalance: nb, bet, mines: safeMines };
   })();
   if (r.error) return res.status(400).json(r);
@@ -752,7 +981,7 @@ app.post('/api/game/mines/cashout', (req, res) => {
 });
 
 /* =========================================================
-   COINFLY
+   COINFLY — 42/42/16
    ========================================================= */
 
 app.post('/api/game/coinfly', (req, res) => {
@@ -766,14 +995,15 @@ app.post('/api/game/coinfly', (req, res) => {
     const user = db.prepare('SELECT * FROM users WHERE telegram_id = ?').get(tgUser.id);
     if (user.balance < bet) return { error: 'insufficient funds' };
     const roll = crypto.randomInt(0, 100);
-    const outcome = roll < 45 ? 'heads' : roll < 90 ? 'tails' : 'edge';
-    const multipliers = { heads: 2, tails: 2, edge: 9 };
+    const outcome = roll < 42 ? 'heads' : roll < 84 ? 'tails' : 'edge';
+    const multipliers = { heads: 2, tails: 2, edge: 5 };
     const won = outcome === req.body.choice;
     const reward = won ? bet * multipliers[outcome] : 0;
     const nb = user.balance - bet + reward;
     const delta = reward - bet;
     db.prepare(`UPDATE users SET balance = ?, total_bets = total_bets + 1, total_wins = total_wins + ?, updated_at = ? WHERE telegram_id = ?`).run(nb, won ? 1 : 0, now, tgUser.id);
     db.prepare(`INSERT INTO transactions (telegram_id, delta, reason, balance_after, created_at) VALUES (?, ?, ?, ?, ?)`).run(tgUser.id, delta, `coinfly:${outcome}`, nb, now);
+    registerTurnover(tgUser.id, bet);
     if (won && reward >= 100) addLiveWin(tgUser.id, user.username, 'Монетка', reward);
     return { outcome, won, reward, newBalance: nb, delta };
   })();
@@ -790,9 +1020,7 @@ app.post('/api/request-nft-withdraw', async (req, res) => {
   if (!tgUser) return res.status(401).json({ error: 'invalid initData' });
   const amount = Math.floor(Number(req.body?.amount));
   if (!Number.isFinite(amount) || amount < MIN_WITHDRAW) return res.status(400).json({ error: `min ${MIN_WITHDRAW}` });
-
   const now = Date.now();
-  let result;
   const r = db.transaction(() => {
     const user = db.prepare('SELECT * FROM users WHERE telegram_id = ?').get(tgUser.id);
     if (!user || user.balance < amount) return { error: 'insufficient funds' };
@@ -803,36 +1031,22 @@ app.post('/api/request-nft-withdraw', async (req, res) => {
     return { ok: true, newBalance: nb, requestId: ins.lastInsertRowid };
   })();
   if (r.error) return res.status(400).json(r);
-  result = r;
-
   if (ADMIN_ID && BOT_TOKEN) {
     try {
       const user = db.prepare('SELECT username, first_name FROM users WHERE telegram_id = ?').get(tgUser.id);
       const usernameLine = user?.username
         ? `📛 Username: <b>@${user.username}</b>\n🔗 <a href="https://t.me/${user.username}">Открыть чат</a>`
         : `📛 Username: <i>не задан</i>\n🆔 ID: <code>${tgUser.id}</code>`;
-      const adminText =
-        `🎁 <b>Новая заявка на NFT-вывод</b>\n\n` +
-        `👤 Игрок: <b>${user?.first_name || 'без имени'}</b>\n` +
-        `${usernameLine}\n` +
-        `💰 Сумма: <b>${amount} ⭐</b>\n` +
-        `📅 Заявка #${result.requestId}\n\n` +
-        `Подтверди или отклони кнопками.`;
-      const rows = [
-        [
-          { text: '✅ Подтвердить', callback_data: `withdraw_approve_${result.requestId}` },
-          { text: '❌ Отклонить', callback_data: `withdraw_reject_${result.requestId}` }
-        ]
-      ];
-      if (user?.username) {
-        rows.push([{ text: `💬 Написать @${user.username}`, url: `https://t.me/${user.username}` }]);
-      }
-      const keyboard = { inline_keyboard: rows };
-      await sendTelegramMessage(ADMIN_ID, adminText, keyboard);
+      const adminText = `🎁 <b>Заявка на NFT-вывод</b>\n\n👤 <b>${user?.first_name || 'игрок'}</b>\n${usernameLine}\n💰 <b>${amount} ⭐</b>\n📅 #${r.requestId}`;
+      const rows = [[
+        { text: '✅ Подтвердить', callback_data: `withdraw_approve_${r.requestId}` },
+        { text: '❌ Отклонить', callback_data: `withdraw_reject_${r.requestId}` }
+      ]];
+      if (user?.username) rows.push([{ text: `💬 @${user.username}`, url: `https://t.me/${user.username}` }]);
+      await sendTelegramMessage(ADMIN_ID, adminText, { inline_keyboard: rows });
     } catch (e) { console.error('[withdraw] notify admin error:', e); }
   }
-
-  res.json({ ok: true, newBalance: result.newBalance, requestId: result.requestId });
+  res.json({ ok: true, newBalance: r.newBalance, requestId: r.requestId });
 });
 
 /* =========================================================
@@ -859,22 +1073,16 @@ app.post('/api/crypto/create', async (req, res) => {
   if (!tgUser) return res.status(401).json({ error: 'invalid initData' });
   const stars = Math.floor(Number(req.body?.amount));
   if (!Number.isFinite(stars) || stars < 10 || stars > 100000) return res.status(400).json({ error: 'invalid amount' });
-  const rub = stars * 2;
+  const rub = stars * STAR_TO_RUB;
   const usdt = (rub / USDT_RUB_RATE).toFixed(2);
   const now = Date.now();
   const payload = `crypto_${tgUser.id}_${stars}_${now}`;
   try {
     const invoice = await cryptoApiCall('createInvoice', {
-      currency_type: 'crypto',
-      asset: 'USDT',
-      amount: usdt,
-      description: `Пополнение ${stars} ⭐`,
-      payload,
-      expires_in: 1800,
-      paid_btn_name: 'openBot',
-      paid_btn_url: 'https://t.me/CryptoBot',
-      allow_comments: false,
-      allow_anonymous: false,
+      currency_type: 'crypto', asset: 'USDT', amount: usdt,
+      description: `Пополнение ${stars} ⭐`, payload, expires_in: 1800,
+      paid_btn_name: 'openBot', paid_btn_url: 'https://t.me/CryptoBot',
+      allow_comments: false, allow_anonymous: false,
     });
     db.prepare(`INSERT INTO payments (telegram_id, amount, method, payload, invoice_id, status, created_at) VALUES (?, ?, 'crypto', ?, ?, 'pending', ?)`).run(tgUser.id, stars, payload, String(invoice.invoice_id), now);
     res.json({ ok: true, invoiceId: invoice.invoice_id, payUrl: invoice.bot_invoice_url || invoice.mini_app_invoice_url, amountUsdt: usdt, amountStars: stars, amountRub: rub, payload });
@@ -902,14 +1110,8 @@ app.post('/api/crypto/webhook/:secret', async (req, res) => {
         return res.json({ ok: true });
       }
       const now = Date.now();
-      db.transaction(() => {
-        const user = db.prepare('SELECT balance FROM users WHERE telegram_id = ?').get(payment.telegram_id);
-        if (!user) return;
-        const nb = user.balance + payment.amount;
-        db.prepare(`UPDATE users SET balance = ?, updated_at = ? WHERE telegram_id = ?`).run(nb, now, payment.telegram_id);
-        db.prepare(`INSERT INTO transactions (telegram_id, delta, reason, balance_after, created_at) VALUES (?, ?, ?, ?, ?)`).run(payment.telegram_id, payment.amount, 'topup_crypto', nb, now);
-        db.prepare(`UPDATE payments SET status = 'paid', paid_at = ?, invoice_id = ? WHERE id = ?`).run(now, invoiceId, payment.id);
-      })();
+      db.prepare(`UPDATE payments SET status = 'paid', paid_at = ?, invoice_id = ? WHERE id = ?`).run(now, invoiceId, payment.id);
+      applyDeposit(payment.telegram_id, payment.amount, 'topup_crypto');
       console.log(`[crypto] ✅ ${payment.amount} ⭐ → ${payment.telegram_id}`);
     }
     res.json({ ok: true });
@@ -928,7 +1130,7 @@ app.post('/api/crypto/status', (req, res) => {
 });
 
 /* =========================================================
-   STARS
+   STARS — без ×2, только +10% на первый депозит
    ========================================================= */
 
 app.post('/api/create-invoice', async (req, res) => {
@@ -938,11 +1140,13 @@ app.post('/api/create-invoice', async (req, res) => {
   if (!Number.isFinite(amount) || amount < 10 || amount > 10000) return res.status(400).json({ error: 'invalid amount' });
   const now = Date.now();
   const payload = `stars_${tgUser.id}_${amount}_${now}`;
-  db.prepare(`INSERT INTO payments (telegram_id, amount, method, payload, status, created_at) VALUES (?, ?, 'stars', ?, 'pending', ?)`).run(tgUser.id, amount, payload, now);
+  const paidCount = db.prepare(`SELECT COUNT(*) AS c FROM payments WHERE telegram_id = ? AND status = 'paid'`).get(tgUser.id).c;
+  const isFirst = paidCount === 0 ? 1 : 0;
+  db.prepare(`INSERT INTO payments (telegram_id, amount, method, payload, status, created_at, is_first) VALUES (?, ?, 'stars', ?, 'pending', ?, ?)`).run(tgUser.id, amount, payload, now, isFirst);
   if (!BOT_TOKEN) {
-    const nb = creditBalance(tgUser.id, amount, 'topup_dev');
     db.prepare(`UPDATE payments SET status = 'paid', paid_at = ? WHERE payload = ?`).run(now, payload);
-    return res.json({ dev: true, balance: nb, amount });
+    const dep = applyDeposit(tgUser.id, amount, 'topup_dev');
+    return res.json({ dev: true, balance: dep?.newBalance, amount, bonus: dep?.bonus || 0, isFirst });
   }
   try {
     const r = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/createInvoiceLink`, {
@@ -950,18 +1154,17 @@ app.post('/api/create-invoice', async (req, res) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         title: `Пополнение ${amount} ⭐`,
-        description: `Зачислим ${amount} звёзд на баланс`,
-        payload,
-        currency: 'XTR',
+        description: isFirst
+          ? `Первый депозит +${FIRST_DEPOSIT_BONUS_PERCENT}% бонус`
+          : `Зачислим ${amount} звёзд`,
+        payload, currency: 'XTR',
         prices: [{ label: `${amount} ⭐`, amount }],
       }),
     });
     const data = await r.json();
     if (!data.ok) return res.status(500).json({ error: 'invoice_failed' });
-    res.json({ invoiceLink: data.result });
-  } catch {
-    res.status(500).json({ error: 'network' });
-  }
+    res.json({ invoiceLink: data.result, isFirst });
+  } catch { res.status(500).json({ error: 'network' }); }
 });
 
 async function handleStartCommand(chatId, fromUser) {
@@ -969,15 +1172,13 @@ async function handleStartCommand(chatId, fromUser) {
   const text =
     `⚡️ <b>${name}, добро пожаловать в RITTERZONA!</b>\n\n` +
     `🎰 Здесь выигрывают звёзды каждый день.\n` +
-    `Открой свой первый кейс прямо сейчас.\n\n` +
     `━━━━━━━━━━━━━━━━━\n` +
     `🎁 <b>Твои стартовые бонусы:</b>\n` +
     `▫️ <b>+${WELCOME_BONUS} ⭐</b> на баланс\n` +
-    `▫️ <b>+${WELCOME_TICKETS} билет</b> в копилку\n` +
-    `▫️ <b>+${DAILY_BONUS} ⭐</b> ежедневно\n\n` +
-    `━━━━━━━━━━━━━━━━━\n` +
-    `🎯 Кейсы · Рулетка · Ракета\n` +
-    `💣 Сапёр · Монетка · Джекпот\n\n` +
+    `▫️ <b>+${WELCOME_TICKETS} билет</b>\n` +
+    `▫️ <b>+${FIRST_DEPOSIT_BONUS_PERCENT}%</b> на первый депозит\n` +
+    `▫️ <b>VIP-подписка</b> за ${VIP_PRICE} ⭐\n\n` +
+    `🎯 Каждая ставка = оборот. За каждые ${TURNOVER_TICKET_STEP} ⭐ оборота — билет + ⭐.\n\n` +
     `👇 <b>Твой шанс на крупный выигрыш:</b>`;
   const keyboard = WEBAPP_URL
     ? { inline_keyboard: [[{ text: '🚀 Открыть RITTERZONA', web_app: { url: WEBAPP_URL } }]] }
@@ -997,32 +1198,23 @@ app.post('/api/telegram-webhook', async (req, res) => {
       const data = callback.data || '';
       const chatId = callback.message?.chat?.id;
       const messageId = callback.message?.message_id;
-
       if (String(chatId) !== String(ADMIN_ID)) {
         await answerCallback(callback.id, 'Недоступно', true);
         return res.json({ ok: true });
       }
-
       if (data.startsWith('withdraw_approve_')) {
         const requestId = Number(data.replace('withdraw_approve_', ''));
         const request = db.prepare(`SELECT * FROM withdraw_requests WHERE id = ?`).get(requestId);
-        if (!request || request.status !== 'pending') {
-          await answerCallback(callback.id, 'Заявка уже обработана', true);
-          return res.json({ ok: true });
-        }
+        if (!request || request.status !== 'pending') { await answerCallback(callback.id, 'Уже обработана', true); return res.json({ ok: true }); }
         db.prepare(`UPDATE withdraw_requests SET status = 'completed', processed_at = ? WHERE id = ?`).run(Date.now(), requestId);
-        await sendTelegramMessage(request.telegram_id, `🎁 <b>NFT-подарок отправлен!</b>\n\nТвоя заявка на <b>${request.amount} ⭐</b> одобрена.\nПодарок придёт в личку в течение нескольких минут.`, null);
+        await sendTelegramMessage(request.telegram_id, `🎁 <b>NFT-подарок отправлен!</b>\n\nЗаявка на <b>${request.amount} ⭐</b> одобрена.`, null);
         await editMessageReplyMarkup(chatId, messageId, { inline_keyboard: [[{ text: '✅ Подтверждена', callback_data: 'noop' }]] });
-        await answerCallback(callback.id, `Заявка #${requestId} подтверждена`);
+        await answerCallback(callback.id, `#${requestId} подтверждена`);
       }
-
       if (data.startsWith('withdraw_reject_')) {
         const requestId = Number(data.replace('withdraw_reject_', ''));
         const request = db.prepare(`SELECT * FROM withdraw_requests WHERE id = ?`).get(requestId);
-        if (!request || request.status !== 'pending') {
-          await answerCallback(callback.id, 'Заявка уже обработана', true);
-          return res.json({ ok: true });
-        }
+        if (!request || request.status !== 'pending') { await answerCallback(callback.id, 'Уже обработана', true); return res.json({ ok: true }); }
         const now = Date.now();
         db.transaction(() => {
           db.prepare(`UPDATE withdraw_requests SET status = 'rejected', processed_at = ? WHERE id = ?`).run(now, requestId);
@@ -1033,9 +1225,8 @@ app.post('/api/telegram-webhook', async (req, res) => {
         })();
         await sendTelegramMessage(request.telegram_id, `❌ Заявка на <b>${request.amount} ⭐</b> отклонена. Баланс возвращён.`, null);
         await editMessageReplyMarkup(chatId, messageId, { inline_keyboard: [[{ text: '❌ Отклонена', callback_data: 'noop' }]] });
-        await answerCallback(callback.id, `Заявка #${requestId} отклонена`);
+        await answerCallback(callback.id, `#${requestId} отклонена`);
       }
-
       return res.json({ ok: true });
     }
 
@@ -1048,54 +1239,37 @@ app.post('/api/telegram-webhook', async (req, res) => {
       if (ADMIN_ID && fromId === String(ADMIN_ID)) {
         if (text === '/withdraws' || text === '/w') {
           const pending = db.prepare(`SELECT * FROM withdraw_requests WHERE status = 'pending' ORDER BY created_at DESC LIMIT 20`).all();
-          if (pending.length === 0) {
-            await sendTelegramMessage(chatId, '📭 Нет активных заявок', null);
-          } else {
-            for (const req of pending) {
-              const user = db.prepare('SELECT username, first_name FROM users WHERE telegram_id = ?').get(req.telegram_id);
-              const usernameLine = user?.username
-                ? `📛 @${user.username}\n🔗 <a href="https://t.me/${user.username}">Открыть чат</a>`
-                : `📛 <i>username не задан</i>\n🆔 <code>${req.telegram_id}</code>`;
-              const txt =
-                `📋 <b>Заявка #${req.id}</b>\n` +
-                `👤 <b>${user?.first_name || ''}</b>\n` +
-                `${usernameLine}\n` +
-                `💰 ${req.amount} ⭐\n` +
-                `📅 ${new Date(req.created_at).toLocaleString('ru')}`;
-              const rows = [
-                [
-                  { text: '✅ Подтвердить', callback_data: `withdraw_approve_${req.id}` },
-                  { text: '❌ Отклонить', callback_data: `withdraw_reject_${req.id}` }
-                ]
-              ];
-              if (user?.username) {
-                rows.push([{ text: `💬 Написать @${user.username}`, url: `https://t.me/${user.username}` }]);
-              }
-              const kb = { inline_keyboard: rows };
-              await sendTelegramMessage(chatId, txt, kb);
-            }
+          if (pending.length === 0) await sendTelegramMessage(chatId, '📭 Нет активных заявок', null);
+          else for (const req of pending) {
+            const user = db.prepare('SELECT username, first_name FROM users WHERE telegram_id = ?').get(req.telegram_id);
+            const usernameLine = user?.username ? `📛 @${user.username}\n🔗 <a href="https://t.me/${user.username}">Открыть чат</a>` : `📛 <i>username не задан</i>\n🆔 <code>${req.telegram_id}</code>`;
+            const txt = `📋 <b>Заявка #${req.id}</b>\n👤 <b>${user?.first_name || ''}</b>\n${usernameLine}\n💰 ${req.amount} ⭐\n📅 ${new Date(req.created_at).toLocaleString('ru')}`;
+            const rows = [[{ text: '✅ Подтвердить', callback_data: `withdraw_approve_${req.id}` }, { text: '❌ Отклонить', callback_data: `withdraw_reject_${req.id}` }]];
+            if (user?.username) rows.push([{ text: `💬 @${user.username}`, url: `https://t.me/${user.username}` }]);
+            await sendTelegramMessage(chatId, txt, { inline_keyboard: rows });
           }
         }
         if (text === '/stats') {
           const totalUsers = db.prepare(`SELECT COUNT(*) AS c FROM users`).get().c;
+          const vipCount = db.prepare(`SELECT COUNT(*) AS c FROM users WHERE vip_until > ?`).get(Date.now()).c;
           const pendingCount = db.prepare(`SELECT COUNT(*) AS c FROM withdraw_requests WHERE status = 'pending'`).get().c;
           const totalBalance = db.prepare(`SELECT SUM(balance) AS s FROM users`).get().s || 0;
           const totalPaid = db.prepare(`SELECT COUNT(*) AS c FROM payments WHERE status = 'paid'`).get().c;
+          const totalDeposited = db.prepare(`SELECT SUM(amount) AS s FROM payments WHERE status = 'paid'`).get().s || 0;
+          const totalTurnover = db.prepare(`SELECT SUM(total_turnover) AS s FROM users`).get().s || 0;
           const stats =
             `📊 <b>Статистика RITTERZONA</b>\n\n` +
-            `👥 Пользователей: <b>${totalUsers}</b>\n` +
-            `💰 Общий баланс: <b>${totalBalance} ⭐</b>\n` +
-            `💳 Успешных платежей: <b>${totalPaid}</b>\n` +
-            `⏳ Заявок на вывод: <b>${pendingCount}</b>`;
+            `👥 Игроков: <b>${totalUsers}</b>\n` +
+            `👑 VIP: <b>${vipCount}</b>\n` +
+            `💰 Баланс игроков: <b>${totalBalance} ⭐</b>\n` +
+            `💳 Платежей: <b>${totalPaid}</b>\n` +
+            `💵 Депозитов: <b>${totalDeposited} ⭐</b>\n` +
+            `🔄 Оборот: <b>${totalTurnover} ⭐</b>\n` +
+            `⏳ Заявок: <b>${pendingCount}</b>`;
           await sendTelegramMessage(chatId, stats, null);
         }
         if (text === '/help') {
-          const help =
-            `<b>Админ-команды</b>\n\n` +
-            `/stats — статистика\n` +
-            `/withdraws — активные заявки\n` +
-            `/help — эта справка`;
-          await sendTelegramMessage(chatId, help, null);
+          await sendTelegramMessage(chatId, `<b>Админ-команды</b>\n\n/stats\n/withdraws\n/help`, null);
         }
       }
 
@@ -1112,8 +1286,8 @@ app.post('/api/telegram-webhook', async (req, res) => {
       if (tgId && amount > 0) {
         const payment = db.prepare(`SELECT * FROM payments WHERE payload = ? AND status = 'pending'`).get(payload);
         if (payment) {
-          creditBalance(tgId, amount, 'topup_stars');
           db.prepare(`UPDATE payments SET status = 'paid', paid_at = ? WHERE id = ?`).run(Date.now(), payment.id);
+          applyDeposit(tgId, amount, 'topup_stars');
           console.log(`[stars] ✅ ${amount} ⭐ → ${tgId}`);
         }
       }
@@ -1152,11 +1326,16 @@ app.use((req, res, next) => {
 
 app.listen(PORT, async () => {
   console.log(`✅ Server running on http://localhost:${PORT}`);
-  console.log(`   BOT_TOKEN: ${BOT_TOKEN ? 'установлен' : 'НЕ установлен (dev)'}`);
-  console.log(`   WEBAPP_URL: ${WEBAPP_URL || 'НЕ задан'}`);
-  console.log(`   CRYPTO_PAY_TOKEN: ${CRYPTO_PAY_TOKEN ? 'установлен' : 'НЕ установлен'}`);
-  console.log(`   ADMIN_ID: ${ADMIN_ID || 'НЕ задан'}`);
+  console.log(`   BOT_TOKEN: ${BOT_TOKEN ? '✅' : '❌ dev'}`);
+  console.log(`   WEBAPP_URL: ${WEBAPP_URL || '❌'}`);
+  console.log(`   CRYPTO_PAY_TOKEN: ${CRYPTO_PAY_TOKEN ? '✅' : '❌'}`);
+  console.log(`   ADMIN_ID: ${ADMIN_ID || '❌'}`);
   console.log(`   Экономика: 1 ⭐ = ${STAR_TO_RUB} ₽`);
-  console.log(`   Приветственный бонус: ${WELCOME_BONUS} ⭐ + ${WELCOME_TICKETS} 🎟`);
+  console.log(`   Welcome: ${WELCOME_BONUS} ⭐ + ${WELCOME_TICKETS} 🎟`);
+  console.log(`   Первый депозит: +${FIRST_DEPOSIT_BONUS_PERCENT}%`);
+  console.log(`   VIP: ${VIP_PRICE} ⭐ / ${VIP_DURATION_MS / 86400000} дн`);
+  console.log(`   Оборот: ${TURNOVER_TICKET_STEP} ⭐ = +1 🎟 + ${TURNOVER_BONUS_STARS} ⭐ (лимит ${TURNOVER_DAILY_LIMIT}/день)`);
+  console.log(`   Referral: ${REFERRAL_PERCENT * 100}% от депозитов крупных (≥ ${REFERRAL_BIG_THRESHOLD} ⭐)`);
+  console.log(`   Rocket: min x${ROCKET_MIN_CASHOUT}, instant crash ${ROCKET_INSTANT_CRASH_BASE}% + abuse`);
   await setupTelegramWebhook();
 });

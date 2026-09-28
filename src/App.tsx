@@ -609,8 +609,12 @@ function App() {
             <button type="button" className="modal-close" onClick={() => setTopupOpen(false)}>✕</button>
             <div className="modal-emoji">💰</div>
             <h3>Пополнить баланс</h3>
-            <p className="modal-sub">1 ⭐ = 2 ₽. Минимум 10 ⭐.</p>
-            <div className="topup-display"><span>+</span><b>{topupAmount}</b><span>⭐</span></div>
+            <p className="modal-sub">1 ⭐ = 2 ₽. Минимум 10 ⭐.{topupIsFirst ? ' 🎉 +10% на первый депозит!' : ''}</p>
+<div className="topup-display">
+  <span>+</span>
+  <b>{topupIsFirst ? Math.floor(topupAmount * 1.1) : topupAmount}</b>
+  <span>⭐</span>
+</div>
             <div className="topup-slider">
               <input type="range" min={10} max={5000} step={10} value={topupAmount} onChange={(e) => setTopupAmount(Number(e.target.value))} />
             </div>
