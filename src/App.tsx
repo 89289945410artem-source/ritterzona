@@ -292,9 +292,9 @@ function App() {
           setVipUntil(data.profile.vipUntil || 0);
           if (typeof data.profile.smallBetsRemaining === 'number') setSmallBetsRemaining(data.profile.smallBetsRemaining);
           setProfileReady(true);
-        } else { setBalance(15); setProfileReady(true); }
+        } else { setBalance(25); setProfileReady(true); }
       } catch {
-        if (!cancelled) { setBalance(15); setProfileReady(true); }
+        if (!cancelled) { setBalance(25); setProfileReady(true); }
       }
     }
     loadProfile();

@@ -26,7 +26,7 @@ if (!ADMIN_ID) console.warn('⚠️ ADMIN_ID не задан');
 
 const STAR_TO_RUB = 2;
 const USDT_RUB_RATE = 100;
-const WELCOME_BONUS = 15;
+const WELCOME_BONUS = 25;
 const WELCOME_TICKETS = 1;
 const DAILY_BONUS = 1;
 const DAILY_INTERVAL_MS = 2 * 86400000;
