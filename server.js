@@ -26,14 +26,15 @@ if (!ADMIN_ID) console.warn('⚠️ ADMIN_ID не задан');
 
 const STAR_TO_RUB = 2;
 const USDT_RUB_RATE = 100;
-const WELCOME_BONUS = 45;
+const WELCOME_BONUS = 15;
 const WELCOME_TICKETS = 1;
+const DAILY_BONUS = 1;
 const DAILY_TICKET_EVERY = 7;
 const PROMO_INVITER_TICKETS = 1;
 const PROMO_ACTIVATOR_BONUS = 5;
 const PROMO_MAX_USES = 1000;
 const BOX_PRICE = 1;
-const MIN_WITHDRAW = 500;
+const MIN_WITHDRAW = 1250;
 
 const app = express();
 app.use(express.json({ limit: '100kb' }));
@@ -69,11 +70,6 @@ db.exec(`
     token TEXT PRIMARY KEY, telegram_id INTEGER NOT NULL, bet INTEGER NOT NULL,
     mines INTEGER NOT NULL, mines_positions TEXT NOT NULL,
     opened TEXT NOT NULL DEFAULT '[]', created_at INTEGER NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS quests (
-    telegram_id INTEGER NOT NULL, quest_id TEXT NOT NULL,
-    progress INTEGER NOT NULL DEFAULT 0, claimed INTEGER NOT NULL DEFAULT 0,
-    updated_at INTEGER NOT NULL, PRIMARY KEY (telegram_id, quest_id)
   );
   CREATE TABLE IF NOT EXISTS live_wins (
     id INTEGER PRIMARY KEY AUTOINCREMENT, telegram_id INTEGER NOT NULL,
@@ -164,28 +160,6 @@ async function editMessageReplyMarkup(chatId, messageId, replyMarkup) {
   } catch {}
 }
 
-const QUESTS = [
-  { id: 'bet1', name: 'Первая ставка', goal: 1, reward: 1 },
-  { id: 'bet5', name: '5 ставок', goal: 5, reward: 2 },
-  { id: 'bet20', name: '20 ставок', goal: 20, reward: 5 },
-  { id: 'case3', name: 'Открой 3 кейса', goal: 3, reward: 3 },
-  { id: 'promo1', name: 'Активируй промокод', goal: 1, reward: 5 },
-  { id: 'ticket1', name: 'Получи 1 билет', goal: 1, reward: 2 },
-  { id: 'mines1', name: 'Сыграй в Сапёр', goal: 1, reward: 1 },
-];
-
-function updateQuest(tgId, questId, delta = 1) {
-  const now = Date.now();
-  let row = db.prepare(`SELECT * FROM quests WHERE telegram_id = ? AND quest_id = ?`).get(tgId, questId);
-  if (!row) {
-    db.prepare(`INSERT INTO quests (telegram_id, quest_id, progress, claimed, updated_at) VALUES (?, ?, 0, 0, ?)`).run(tgId, questId, now);
-    row = db.prepare(`SELECT * FROM quests WHERE telegram_id = ? AND quest_id = ?`).get(tgId, questId);
-  }
-  if (row.claimed) return;
-  db.prepare(`UPDATE quests SET progress = ?, updated_at = ? WHERE telegram_id = ? AND quest_id = ?`)
-    .run(Math.min(row.progress + delta, 999), now, tgId, questId);
-}
-
 function addTickets(tgId, amount, reason) {
   if (amount <= 0) return;
   const now = Date.now();
@@ -262,7 +236,7 @@ function addLiveWin(tgId, username, game, amount) {
 }
 
 /* =========================================================
-   BOX / DAILY / QUESTS
+   BOX / DAILY
    ========================================================= */
 
 app.post('/api/box/open', (req, res) => {
@@ -304,41 +278,23 @@ app.post('/api/daily-bonus', (req, res) => {
   if (lastBonus && now - lastBonus.created_at < dayMs) return res.status(400).json({ error: 'already_claimed', nextAt: lastBonus.created_at + dayMs });
   let newStreak = 1;
   if (user.last_login && now - user.last_login < 2 * dayMs) newStreak = Math.min((user.streak||0)+1, 30);
+
+  const newBalance = user.balance + DAILY_BONUS;
   let ticketsGiven = 0;
   if (newStreak % DAILY_TICKET_EVERY === 0) { ticketsGiven = 1; addTickets(tgUser.id, 1, `daily_streak_day${newStreak}`); }
-  db.prepare(`UPDATE users SET streak = ?, last_login = ?, updated_at = ? WHERE telegram_id = ?`).run(newStreak, now, now, tgUser.id);
-  db.prepare(`INSERT INTO transactions (telegram_id, delta, reason, balance_after, created_at) VALUES (?, ?, ?, ?, ?)`).run(tgUser.id, 0, 'daily_bonus', user.balance, now);
-  res.json({ balance: user.balance, bonus: 0, streak: newStreak, ticketsGiven, message: ticketsGiven ? `🔥 Streak ${newStreak} дней! +1 билет 🎟` : `🔥 Streak ${newStreak}` });
-});
 
-app.post('/api/quests/list', (req, res) => {
-  const tgUser = verifyInitData(req.body?.initData);
-  if (!tgUser) return res.status(401).json({ error: 'invalid initData' });
-  const items = QUESTS.map(q => {
-    const row = db.prepare(`SELECT * FROM quests WHERE telegram_id = ? AND quest_id = ?`).get(tgUser.id, q.id);
-    return { ...q, progress: row?.progress||0, claimed: !!row?.claimed };
+  db.prepare(`UPDATE users SET balance = ?, streak = ?, last_login = ?, updated_at = ? WHERE telegram_id = ?`)
+    .run(newBalance, newStreak, now, now, tgUser.id);
+  db.prepare(`INSERT INTO transactions (telegram_id, delta, reason, balance_after, created_at) VALUES (?, ?, ?, ?, ?)`)
+    .run(tgUser.id, DAILY_BONUS, 'daily_bonus', newBalance, now);
+
+  res.json({
+    balance: newBalance,
+    bonus: DAILY_BONUS,
+    streak: newStreak,
+    ticketsGiven,
+    message: `🔥 Streak ${newStreak} · +${DAILY_BONUS} ⭐`,
   });
-  res.json({ items });
-});
-
-app.post('/api/quests/claim', (req, res) => {
-  const tgUser = verifyInitData(req.body?.initData);
-  if (!tgUser) return res.status(401).json({ error: 'invalid initData' });
-  const quest = QUESTS.find(q => q.id === req.body?.questId);
-  if (!quest) return res.status(400).json({ error: 'invalid quest' });
-  const row = db.prepare(`SELECT * FROM quests WHERE telegram_id = ? AND quest_id = ?`).get(tgUser.id, quest.id);
-  if (!row || row.claimed) return res.status(400).json({ error: 'not claimable' });
-  if (row.progress < quest.goal) return res.status(400).json({ error: 'not complete' });
-  const now = Date.now();
-  const nb = db.transaction(() => {
-    const user = db.prepare('SELECT balance FROM users WHERE telegram_id = ?').get(tgUser.id);
-    const balance = user.balance + quest.reward;
-    db.prepare(`UPDATE quests SET claimed = 1, updated_at = ? WHERE telegram_id = ? AND quest_id = ?`).run(now, tgUser.id, quest.id);
-    db.prepare(`UPDATE users SET balance = ?, updated_at = ? WHERE telegram_id = ?`).run(balance, now, tgUser.id);
-    db.prepare(`INSERT INTO transactions (telegram_id, delta, reason, balance_after, created_at) VALUES (?, ?, ?, ?, ?)`).run(tgUser.id, quest.reward, `quest:${quest.id}`, balance, now);
-    return balance;
-  })();
-  res.json({ balance: nb, reward: quest.reward });
 });
 
 /* =========================================================
@@ -416,7 +372,6 @@ app.post('/api/promo/redeem', (req, res) => {
     }
     addTickets(promo.owner_id, PROMO_INVITER_TICKETS, `promo:${code}`);
   })();
-  updateQuest(tgUser.id, 'promo1');
   res.json({ ok: true, reward: PROMO_ACTIVATOR_BONUS, message: `Промокод активирован! +${PROMO_ACTIVATOR_BONUS} ⭐` });
 });
 
@@ -493,10 +448,17 @@ app.post('/api/tickets/open', (req, res) => {
 });
 
 /* =========================================================
-   GAMES — честный house edge
+   ROULETTE
    ========================================================= */
 
-const BASE_SEGMENTS = [2,3,2,2,3,2,5,2,3,2,2,3,10,2,5,3,2,2,3,2,5,3,2,2,3,2,5,2,3,2,30,10,3,5,3,10,2,2,5,3];
+const BASE_SEGMENTS = [
+  1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8,
+  1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8,
+  3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+  5, 5, 5, 5, 5,
+  8, 8, 8,
+  20, 20,
+];
 
 app.post('/api/game/roulette', (req, res) => {
   const tgUser = verifyInitData(req.body?.initData);
@@ -504,25 +466,28 @@ app.post('/api/game/roulette', (req, res) => {
   const bet = Math.floor(Number(req.body?.bet));
   const selected = Number(req.body?.selected);
   if (!Number.isFinite(bet) || bet < 10) return res.status(400).json({ error: 'invalid bet' });
-  if (![2,3,5,10,30].includes(selected)) return res.status(400).json({ error: 'invalid selected' });
+  if (![1.8, 3, 5, 8, 20].includes(selected)) return res.status(400).json({ error: 'invalid selected' });
   const now = Date.now();
   const r = db.transaction(() => {
     const user = db.prepare('SELECT * FROM users WHERE telegram_id = ?').get(tgUser.id);
     if (user.balance < bet) return { error: 'insufficient funds' };
     const winner = BASE_SEGMENTS[crypto.randomInt(0, BASE_SEGMENTS.length)];
     const won = winner === selected;
-    const reward = won ? bet * winner : 0;
+    const reward = won ? Math.floor(bet * winner) : 0;
     const nb = user.balance - bet + reward;
     db.prepare(`UPDATE users SET balance = ?, total_bets = total_bets + 1, total_wins = total_wins + ?, updated_at = ? WHERE telegram_id = ?`).run(nb, won?1:0, now, tgUser.id);
     db.prepare(`INSERT INTO transactions (telegram_id, delta, reason, balance_after, created_at) VALUES (?, ?, ?, ?, ?)`).run(tgUser.id, reward - bet, `roulette:x${winner}`, nb, now);
     db.prepare(`INSERT INTO history (telegram_id, game, text, amount, win, created_at) VALUES (?, ?, ?, ?, ?, ?)`).run(tgUser.id, 'Рулетка', `Выпал x${winner}`, reward - bet, won?1:0, now);
-    updateQuest(tgUser.id, 'bet1'); updateQuest(tgUser.id, 'bet5'); updateQuest(tgUser.id, 'bet20');
     if (won && reward >= 100) addLiveWin(tgUser.id, user.username, 'Рулетка', reward);
     return { winner, won, reward, newBalance: nb, delta: reward - bet };
   })();
   if (r.error) return res.status(400).json(r);
   res.json(r);
 });
+
+/* =========================================================
+   ROCKET
+   ========================================================= */
 
 function generateCrashPoint() {
   if (crypto.randomInt(0, 100) < 12) return 1.0;
@@ -543,7 +508,6 @@ app.post('/api/game/rocket/start', (req, res) => {
     const nb = user.balance - bet;
     db.prepare(`UPDATE users SET balance = ?, total_bets = total_bets + 1, updated_at = ? WHERE telegram_id = ?`).run(nb, now, tgUser.id);
     db.prepare(`INSERT INTO transactions (telegram_id, delta, reason, balance_after, created_at) VALUES (?, ?, ?, ?, ?)`).run(tgUser.id, -bet, 'rocket:bet', nb, now);
-    updateQuest(tgUser.id, 'bet1'); updateQuest(tgUser.id, 'bet5'); updateQuest(tgUser.id, 'bet20');
     return { crashPoint, newBalance: nb };
   })();
   if (r.error) return res.status(400).json(r);
@@ -588,81 +552,81 @@ const RARITY_CHANCES = { common: 55, uncommon: 25, rare: 12, epic: 5, legendary:
 
 const CASES = [
   { id: 'starter', name: 'Starter', price: 10, drops: [
-    { name: 'Rusty Coin', icon: '🪙', price: 4, rarity: 'common' },
-    { name: 'Copper Ring', icon: '💍', price: 9, rarity: 'uncommon' },
-    { name: 'Small Gem', icon: '🔹', price: 18, rarity: 'rare' },
-    { name: 'Silver Star', icon: '⭐', price: 50, rarity: 'epic' },
-    { name: 'Blue Crystal', icon: '💎', price: 150, rarity: 'legendary' },
+    { name: 'Rusty Coin', icon: '🪙', price: 1, rarity: 'common' },
+    { name: 'Copper Ring', icon: '💍', price: 4, rarity: 'uncommon' },
+    { name: 'Small Gem', icon: '🔹', price: 12, rarity: 'rare' },
+    { name: 'Silver Star', icon: '⭐', price: 40, rarity: 'epic' },
+    { name: 'Blue Crystal', icon: '💎', price: 120, rarity: 'legendary' },
   ]},
   { id: 'bronze', name: 'Bronze', price: 25, drops: [
-    { name: 'Bronze Coin', icon: '🪙', price: 11, rarity: 'common' },
-    { name: 'Bronze Star', icon: '⭐', price: 25, rarity: 'uncommon' },
-    { name: 'Orange Crystal', icon: '🔶', price: 55, rarity: 'rare' },
-    { name: 'Small Crown', icon: '👑', price: 180, rarity: 'epic' },
-    { name: 'Red Gem', icon: '💎', price: 550, rarity: 'legendary' },
+    { name: 'Bronze Coin', icon: '🪙', price: 3, rarity: 'common' },
+    { name: 'Bronze Star', icon: '⭐', price: 10, rarity: 'uncommon' },
+    { name: 'Orange Crystal', icon: '🔶', price: 30, rarity: 'rare' },
+    { name: 'Small Crown', icon: '👑', price: 100, rarity: 'epic' },
+    { name: 'Red Gem', icon: '💎', price: 300, rarity: 'legendary' },
   ]},
   { id: 'lucky', name: 'Lucky', price: 49, drops: [
-    { name: 'Lucky Coin', icon: '🍀', price: 22, rarity: 'common' },
-    { name: 'Green Gem', icon: '💚', price: 55, rarity: 'uncommon' },
-    { name: 'Four Leaf', icon: '🍀', price: 120, rarity: 'rare' },
-    { name: 'Golden Clover', icon: '🌟', price: 350, rarity: 'epic' },
-    { name: 'JACKPOT', icon: '💰', price: 1100, rarity: 'legendary' },
+    { name: 'Lucky Coin', icon: '🍀', price: 5, rarity: 'common' },
+    { name: 'Green Gem', icon: '💚', price: 20, rarity: 'uncommon' },
+    { name: 'Four Leaf', icon: '🍀', price: 60, rarity: 'rare' },
+    { name: 'Golden Clover', icon: '🌟', price: 200, rarity: 'epic' },
+    { name: 'JACKPOT', icon: '💰', price: 600, rarity: 'legendary' },
   ]},
   { id: 'silver', name: 'Silver', price: 100, drops: [
-    { name: 'Silver Coin', icon: '🪙', price: 45, rarity: 'common' },
-    { name: 'Silver Star', icon: '🌟', price: 110, rarity: 'uncommon' },
-    { name: 'Blue Crystal', icon: '🔷', price: 250, rarity: 'rare' },
-    { name: 'Silver Crown', icon: '👑', price: 700, rarity: 'epic' },
-    { name: 'Ice Gem', icon: '💎', price: 2200, rarity: 'legendary' },
+    { name: 'Silver Coin', icon: '🪙', price: 10, rarity: 'common' },
+    { name: 'Silver Star', icon: '🌟', price: 40, rarity: 'uncommon' },
+    { name: 'Blue Crystal', icon: '🔷', price: 120, rarity: 'rare' },
+    { name: 'Silver Crown', icon: '👑', price: 400, rarity: 'epic' },
+    { name: 'Ice Gem', icon: '💎', price: 1200, rarity: 'legendary' },
   ]},
   { id: 'gold', name: 'Gold', price: 250, drops: [
-    { name: 'Gold Coin', icon: '🪙', price: 112, rarity: 'common' },
-    { name: 'Gold Star', icon: '🌟', price: 275, rarity: 'uncommon' },
-    { name: 'Gold Crystal', icon: '🔶', price: 625, rarity: 'rare' },
-    { name: 'Golden Crown', icon: '👑', price: 1750, rarity: 'epic' },
-    { name: 'Dragon Gem', icon: '🐉', price: 5600, rarity: 'legendary' },
+    { name: 'Gold Coin', icon: '🪙', price: 25, rarity: 'common' },
+    { name: 'Gold Star', icon: '🌟', price: 100, rarity: 'uncommon' },
+    { name: 'Gold Crystal', icon: '🔶', price: 300, rarity: 'rare' },
+    { name: 'Golden Crown', icon: '👑', price: 1000, rarity: 'epic' },
+    { name: 'Dragon Gem', icon: '🐉', price: 3000, rarity: 'legendary' },
   ]},
   { id: 'platinum', name: 'Platinum', price: 500, drops: [
-    { name: 'Platinum Chip', icon: '💠', price: 225, rarity: 'common' },
-    { name: 'Platinum Star', icon: '✨', price: 550, rarity: 'uncommon' },
-    { name: 'Frost Crystal', icon: '❄️', price: 1250, rarity: 'rare' },
-    { name: 'Platinum Crown', icon: '👑', price: 3500, rarity: 'epic' },
-    { name: 'Frozen Heart', icon: '💎', price: 11000, rarity: 'legendary' },
+    { name: 'Platinum Chip', icon: '💠', price: 50, rarity: 'common' },
+    { name: 'Platinum Star', icon: '✨', price: 200, rarity: 'uncommon' },
+    { name: 'Frost Crystal', icon: '❄️', price: 600, rarity: 'rare' },
+    { name: 'Platinum Crown', icon: '👑', price: 2000, rarity: 'epic' },
+    { name: 'Frozen Heart', icon: '💎', price: 6000, rarity: 'legendary' },
   ]},
   { id: 'diamond', name: 'Diamond', price: 1000, drops: [
-    { name: 'Diamond Chip', icon: '💎', price: 450, rarity: 'common' },
-    { name: 'Diamond Star', icon: '⭐', price: 1100, rarity: 'uncommon' },
-    { name: 'Aqua Gem', icon: '🔷', price: 2500, rarity: 'rare' },
-    { name: 'Diamond Crown', icon: '👑', price: 7000, rarity: 'epic' },
-    { name: 'Ocean Heart', icon: '💠', price: 22000, rarity: 'legendary' },
+    { name: 'Diamond Chip', icon: '💎', price: 100, rarity: 'common' },
+    { name: 'Diamond Star', icon: '⭐', price: 400, rarity: 'uncommon' },
+    { name: 'Aqua Gem', icon: '🔷', price: 1200, rarity: 'rare' },
+    { name: 'Diamond Crown', icon: '👑', price: 4000, rarity: 'epic' },
+    { name: 'Ocean Heart', icon: '💠', price: 12000, rarity: 'legendary' },
   ]},
   { id: 'royal', name: 'Royal', price: 2500, drops: [
-    { name: 'Royal Chip', icon: '🟣', price: 1125, rarity: 'common' },
-    { name: 'Royal Star', icon: '🌟', price: 2750, rarity: 'uncommon' },
-    { name: 'Purple Crystal', icon: '🔮', price: 6250, rarity: 'rare' },
-    { name: 'Royal Crown', icon: '👑', price: 17500, rarity: 'epic' },
-    { name: 'King Heart', icon: '💜', price: 55000, rarity: 'legendary' },
+    { name: 'Royal Chip', icon: '🟣', price: 250, rarity: 'common' },
+    { name: 'Royal Star', icon: '🌟', price: 1000, rarity: 'uncommon' },
+    { name: 'Purple Crystal', icon: '🔮', price: 3000, rarity: 'rare' },
+    { name: 'Royal Crown', icon: '👑', price: 10000, rarity: 'epic' },
+    { name: 'King Heart', icon: '💜', price: 30000, rarity: 'legendary' },
   ]},
   { id: 'cosmic', name: 'Cosmic', price: 5000, drops: [
-    { name: 'Star Dust', icon: '✨', price: 2250, rarity: 'common' },
-    { name: 'Cosmic Gem', icon: '🌌', price: 5500, rarity: 'uncommon' },
-    { name: 'Nebula Crystal', icon: '🌠', price: 12500, rarity: 'rare' },
-    { name: 'Galaxy Crown', icon: '👑', price: 35000, rarity: 'epic' },
-    { name: 'Black Hole', icon: '🕳️', price: 110000, rarity: 'legendary' },
+    { name: 'Star Dust', icon: '✨', price: 500, rarity: 'common' },
+    { name: 'Cosmic Gem', icon: '🌌', price: 2000, rarity: 'uncommon' },
+    { name: 'Nebula Crystal', icon: '🌠', price: 6000, rarity: 'rare' },
+    { name: 'Galaxy Crown', icon: '👑', price: 20000, rarity: 'epic' },
+    { name: 'Black Hole', icon: '🕳️', price: 60000, rarity: 'legendary' },
   ]},
   { id: 'dragon', name: 'Dragon', price: 10000, drops: [
-    { name: 'Dragon Scale', icon: '🐲', price: 4500, rarity: 'common' },
-    { name: 'Dragon Claw', icon: '🗡️', price: 11000, rarity: 'uncommon' },
-    { name: 'Dragon Eye', icon: '👁️', price: 25000, rarity: 'rare' },
-    { name: 'Dragon Crown', icon: '👑', price: 70000, rarity: 'epic' },
-    { name: 'Dragon Heart', icon: '🐉', price: 220000, rarity: 'legendary' },
+    { name: 'Dragon Scale', icon: '🐲', price: 1000, rarity: 'common' },
+    { name: 'Dragon Claw', icon: '🗡️', price: 4000, rarity: 'uncommon' },
+    { name: 'Dragon Eye', icon: '👁️', price: 12000, rarity: 'rare' },
+    { name: 'Dragon Crown', icon: '👑', price: 40000, rarity: 'epic' },
+    { name: 'Dragon Heart', icon: '🐉', price: 120000, rarity: 'legendary' },
   ]},
   { id: 'legendary', name: 'Legendary', price: 25000, drops: [
-    { name: 'Legend Chip', icon: '🏅', price: 11250, rarity: 'common' },
-    { name: 'Legend Star', icon: '🌟', price: 27500, rarity: 'uncommon' },
-    { name: 'Legend Crystal', icon: '🔱', price: 62500, rarity: 'rare' },
-    { name: 'Legend Crown', icon: '👑', price: 175000, rarity: 'epic' },
-    { name: 'GOD TIER', icon: '💎', price: 550000, rarity: 'legendary' },
+    { name: 'Legend Chip', icon: '🏅', price: 2500, rarity: 'common' },
+    { name: 'Legend Star', icon: '🌟', price: 10000, rarity: 'uncommon' },
+    { name: 'Legend Crystal', icon: '🔱', price: 30000, rarity: 'rare' },
+    { name: 'Legend Crown', icon: '👑', price: 100000, rarity: 'epic' },
+    { name: 'GOD TIER', icon: '💎', price: 300000, rarity: 'legendary' },
   ]},
 ];
 
@@ -691,7 +655,6 @@ app.post('/api/game/case', (req, res) => {
     db.prepare(`UPDATE users SET balance = ?, total_bets = total_bets + 1, total_wins = total_wins + ?, updated_at = ? WHERE telegram_id = ?`).run(nb, delta >= 0 ? 1 : 0, now, tgUser.id);
     db.prepare(`INSERT INTO transactions (telegram_id, delta, reason, balance_after, created_at) VALUES (?, ?, ?, ?, ?)`).run(tgUser.id, delta, `case:${caseDef.id}`, nb, now);
     db.prepare(`INSERT INTO history (telegram_id, game, text, amount, win, created_at) VALUES (?, ?, ?, ?, ?, ?)`).run(tgUser.id, caseDef.name, `${drop.name} — ${drop.price} ⭐`, delta, delta >= 0 ? 1 : 0, now);
-    updateQuest(tgUser.id, 'case3'); updateQuest(tgUser.id, 'bet1'); updateQuest(tgUser.id, 'bet5'); updateQuest(tgUser.id, 'bet20');
     if (delta >= 500) addLiveWin(tgUser.id, user.username, caseDef.name, delta);
     return { drop, newBalance: nb, delta };
   })();
@@ -732,7 +695,6 @@ app.post('/api/game/mines/start', (req, res) => {
     db.prepare(`UPDATE users SET balance = ?, total_bets = total_bets + 1, updated_at = ? WHERE telegram_id = ?`).run(nb, now, tgUser.id);
     db.prepare(`INSERT INTO transactions (telegram_id, delta, reason, balance_after, created_at) VALUES (?, ?, ?, ?, ?)`).run(tgUser.id, -bet, 'mines:bet', nb, now);
     db.prepare(`INSERT INTO active_mines (token, telegram_id, bet, mines, mines_positions, opened, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`).run(roundToken, tgUser.id, bet, safeMines, JSON.stringify(minesPositions), '[]', now);
-    updateQuest(tgUser.id, 'mines1'); updateQuest(tgUser.id, 'bet1'); updateQuest(tgUser.id, 'bet5'); updateQuest(tgUser.id, 'bet20');
     return { roundToken, newBalance: nb, bet, mines: safeMines };
   })();
   if (r.error) return res.status(400).json(r);
@@ -790,7 +752,7 @@ app.post('/api/game/mines/cashout', (req, res) => {
 });
 
 /* =========================================================
-   COINFLY — house edge через шансы
+   COINFLY
    ========================================================= */
 
 app.post('/api/game/coinfly', (req, res) => {
@@ -812,7 +774,6 @@ app.post('/api/game/coinfly', (req, res) => {
     const delta = reward - bet;
     db.prepare(`UPDATE users SET balance = ?, total_bets = total_bets + 1, total_wins = total_wins + ?, updated_at = ? WHERE telegram_id = ?`).run(nb, won ? 1 : 0, now, tgUser.id);
     db.prepare(`INSERT INTO transactions (telegram_id, delta, reason, balance_after, created_at) VALUES (?, ?, ?, ?, ?)`).run(tgUser.id, delta, `coinfly:${outcome}`, nb, now);
-    updateQuest(tgUser.id, 'bet1'); updateQuest(tgUser.id, 'bet5'); updateQuest(tgUser.id, 'bet20');
     if (won && reward >= 100) addLiveWin(tgUser.id, user.username, 'Монетка', reward);
     return { outcome, won, reward, newBalance: nb, delta };
   })();
@@ -897,7 +858,7 @@ app.post('/api/crypto/create', async (req, res) => {
   const tgUser = verifyInitData(req.body?.initData);
   if (!tgUser) return res.status(401).json({ error: 'invalid initData' });
   const stars = Math.floor(Number(req.body?.amount));
-  if (!Number.isFinite(stars) || stars < 50 || stars > 100000) return res.status(400).json({ error: 'invalid amount' });
+  if (!Number.isFinite(stars) || stars < 10 || stars > 100000) return res.status(400).json({ error: 'invalid amount' });
   const rub = stars * 2;
   const usdt = (rub / USDT_RUB_RATE).toFixed(2);
   const now = Date.now();
@@ -1011,9 +972,9 @@ async function handleStartCommand(chatId, fromUser) {
     `Открой свой первый кейс прямо сейчас.\n\n` +
     `━━━━━━━━━━━━━━━━━\n` +
     `🎁 <b>Твои стартовые бонусы:</b>\n` +
-    `▫️ <b>+45 ⭐</b> на баланс\n` +
-    `▫️ <b>+1 билет</b> в копилку\n` +
-    `▫️ Ежедневный streak-бонус\n\n` +
+    `▫️ <b>+${WELCOME_BONUS} ⭐</b> на баланс\n` +
+    `▫️ <b>+${WELCOME_TICKETS} билет</b> в копилку\n` +
+    `▫️ <b>+${DAILY_BONUS} ⭐</b> ежедневно\n\n` +
     `━━━━━━━━━━━━━━━━━\n` +
     `🎯 Кейсы · Рулетка · Ракета\n` +
     `💣 Сапёр · Монетка · Джекпот\n\n` +
@@ -1196,5 +1157,6 @@ app.listen(PORT, async () => {
   console.log(`   CRYPTO_PAY_TOKEN: ${CRYPTO_PAY_TOKEN ? 'установлен' : 'НЕ установлен'}`);
   console.log(`   ADMIN_ID: ${ADMIN_ID || 'НЕ задан'}`);
   console.log(`   Экономика: 1 ⭐ = ${STAR_TO_RUB} ₽`);
+  console.log(`   Приветственный бонус: ${WELCOME_BONUS} ⭐ + ${WELCOME_TICKETS} 🎟`);
   await setupTelegramWebhook();
 });

@@ -3,7 +3,7 @@ import type { CSSProperties } from 'react';
 import './appStyles.css';
 import { hapticSuccess, hapticError, hapticTap, getTelegramUser, initTelegram } from './telegram';
 
-type Page = 'home' | 'roulette' | 'rocket' | 'cases' | 'mines' | 'coinfly' | 'quests' | 'promo' | 'tickets' | 'bonus';
+type Page = 'home' | 'roulette' | 'rocket' | 'cases' | 'mines' | 'coinfly' | 'promo' | 'tickets' | 'bonus';
 type Multiplier = 1.8 | 3 | 5 | 8 | 20;
 
 type HistoryItem = { id: number; game: string; text: string; amount: number; win: boolean };
@@ -19,12 +19,13 @@ const RARITY_LABEL: Record<Rarity, string> = {
 
 type Drop = { id: string; name: string; icon: string; price: number; color: string; rarity: Rarity };
 type GameCase = { id: string; name: string; price: number; color: string; tagline: string; drops: Drop[] };
-type Quest = { id: string; name: string; goal: number; reward: number; progress: number; claimed: boolean };
 type LiveWin = { username: string; game: string; amount: number; created_at: number };
 type PromoCode = { code: string; createdAt: number; usesCount: number; uniqueUsers: number; maxUses: number };
 type TicketCase = { id: string; name: string; tickets: number; color: string; tagline: string; minReward: number; maxReward: number };
 type TopupMethod = 'stars' | 'crypto';
 type CryptoData = { invoiceId: number; payUrl: string; amountUsdt: string; amountStars: number; amountRub: number; payload: string };
+
+const MIN_WITHDRAW = 1250;
 
 const COLORS: Record<Multiplier, string> = { 1.8: '#9aa0ab', 3: '#ef4444', 5: '#3b82f6', 8: '#22c55e', 20: '#f59e0b' };
 const COLOR_NAMES: Record<Multiplier, string> = { 1.8: 'серый', 3: 'красный', 5: 'синий', 8: 'зелёный', 20: 'жёлтый' };
@@ -184,8 +185,6 @@ function App() {
   const [totalBets, setTotalBets] = useState(0);
   const [streak, setStreak] = useState(0);
 
-  const [quests, setQuests] = useState<Quest[]>([]);
-
   const [tickets, setTickets] = useState(0);
   const [promoOpen, setPromoOpen] = useState(false);
   const [promoList, setPromoList] = useState<PromoCode[]>([]);
@@ -265,9 +264,9 @@ function App() {
           setStreak(data.profile.streak || 0);
           setTickets(data.profile.tickets || 0);
           setProfileReady(true);
-        } else { setBalance(25); setProfileReady(true); }
+        } else { setBalance(15); setProfileReady(true); }
       } catch {
-        if (!cancelled) { setBalance(25); setProfileReady(true); }
+        if (!cancelled) { setBalance(15); setProfileReady(true); }
       }
     }
     loadProfile();
@@ -303,22 +302,6 @@ function App() {
     const iv = window.setInterval(load, 15000);
     return () => { cancelled = true; window.clearInterval(iv); };
   }, []);
-
-  const loadQuests = useCallback(async () => {
-    const initData = window.Telegram?.WebApp?.initData || '';
-    try {
-      const res = await fetch('/api/quests/list', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ initData }) });
-      const data = await res.json();
-      if (Array.isArray(data.items)) setQuests(data.items);
-    } catch {}
-  }, []);
-
-  useEffect(() => {
-    if (!profileReady) return;
-    loadQuests();
-    const iv = window.setInterval(loadQuests, 5000);
-    return () => window.clearInterval(iv);
-  }, [profileReady, loadQuests]);
 
   const loadTicketInfo = useCallback(async () => {
     const initData = window.Telegram?.WebApp?.initData || '';
@@ -364,21 +347,6 @@ function App() {
     } catch { showToast('Ошибка сети'); }
     finally { setSyncing(false); }
   }, [showToast, loadTicketInfo]);
-
-  const claimQuest = useCallback(async (questId: string) => {
-    const initData = window.Telegram?.WebApp?.initData || '';
-    hapticTap();
-    try {
-      const res = await fetch('/api/quests/claim', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ initData, questId }) });
-      const data = await res.json();
-      if (typeof data.balance === 'number') {
-        setBalance(data.balance);
-        hapticSuccess();
-        showToast(`✅ +${data.reward} ⭐`);
-        loadQuests();
-      } else { hapticError(); showToast(data.error || 'Ошибка'); }
-    } catch { hapticError(); showToast('Ошибка сети'); }
-  }, [showToast, loadQuests]);
 
   const openTopup = useCallback(() => {
     hapticTap();
@@ -466,7 +434,7 @@ function App() {
 
   const openNftWithdraw = useCallback(() => {
     hapticTap();
-    if (balance === null || balance < 500) { hapticError(); showToast('Минимум 500 ⭐'); return; }
+    if (balance === null || balance < MIN_WITHDRAW) { hapticError(); showToast(`Минимум ${MIN_WITHDRAW} ⭐`); return; }
     setNftOpen(true);
   }, [balance, showToast]);
 
@@ -522,7 +490,6 @@ function App() {
         const r2 = await fetch('/api/auth-telegram', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ initData }) });
         const d2 = await r2.json();
         if (d2.profile) { setBalance(d2.profile.balance); setTickets(d2.profile.tickets || 0); }
-        loadQuests();
       } else {
         hapticError();
         const map: Record<string, string> = {
@@ -534,7 +501,7 @@ function App() {
       }
     } catch { hapticError(); showToast('Ошибка сети'); }
     finally { setPromoLoading(false); }
-  }, [promoInput, showToast, loadQuests]);
+  }, [promoInput, showToast]);
 
   const openPromoUsers = useCallback(async (code: string) => {
     hapticTap();
@@ -564,10 +531,9 @@ function App() {
       setBalance(data.newBalance);
       window.dispatchEvent(new CustomEvent('balance-update', { detail: { balance: data.newBalance } }));
       showToast(`🎟 +${data.reward} ⭐`);
-      loadQuests();
     } catch { hapticError(); showToast('Ошибка сети'); }
     finally { setTicketOpening(null); }
-  }, [showToast, loadQuests]);
+  }, [showToast]);
 
   const user = getTelegramUser();
 
@@ -624,7 +590,6 @@ function App() {
         {page === 'cases' && <Cases balance={demoMode ? demoBalance : balance} setBalance={demoMode ? setDemoBalance : undefined} demoMode={demoMode} setPage={setPage} showToast={showToast} />}
         {page === 'mines' && <Mines balance={demoMode ? demoBalance : balance} setBalance={demoMode ? setDemoBalance : undefined} demoMode={demoMode} setPage={setPage} showToast={showToast} />}
         {page === 'coinfly' && <Coinfly balance={demoMode ? demoBalance : balance} setBalance={demoMode ? setDemoBalance : undefined} demoMode={demoMode} setPage={setPage} showToast={showToast} />}
-        {page === 'quests' && <Quests quests={quests} setPage={setPage} onClaim={claimQuest} />}
         {page === 'tickets' && <Tickets tickets={tickets} cases={ticketCases} opening={ticketOpening} onOpen={openTicketCase} setPage={setPage} />}
         {page === 'bonus' && <Bonus tickets={tickets} onPromo={openPromo} onClaimBonus={claimDailyBonus} onTickets={() => setPage('tickets')} setPage={setPage} />}
       </div>
@@ -635,7 +600,6 @@ function App() {
         <button type="button" className={page === 'roulette' ? 'active' : ''} onClick={() => { hapticTap(); setPage('roulette'); }}><span>🎯</span>Рулетка</button>
         <button type="button" className={page === 'rocket' ? 'active' : ''} onClick={() => { hapticTap(); setPage('rocket'); }}><span>🚀</span>Ракета</button>
         <button type="button" className={page === 'mines' ? 'active' : ''} onClick={() => { hapticTap(); setPage('mines'); }}><span>💣</span>Сапёр</button>
-        <button type="button" className={page === 'quests' ? 'active' : ''} onClick={() => { hapticTap(); setPage('quests'); }}><span>📋</span>Квесты</button>
         <button type="button" className={page === 'bonus' ? 'active' : ''} onClick={() => { hapticTap(); setPage('bonus'); }}><span>🎁</span>Бонусы</button>
       </nav>
 
@@ -812,8 +776,8 @@ function Home({
       </section>
 
       <section className="withdraw-card">
-        <div><small>Вывод NFT подарком</small><strong>от 500 ⭐</strong></div>
-        <button type="button" disabled={balance < 500} onClick={onNftWithdraw}>Вывести</button>
+        <div><small>Вывод NFT подарком</small><strong>от {MIN_WITHDRAW} ⭐</strong></div>
+        <button type="button" disabled={balance < MIN_WITHDRAW} onClick={onNftWithdraw}>Вывести</button>
       </section>
 
       <h2>Мини-игры</h2>
@@ -892,7 +856,7 @@ function Bonus({
       </section>
 
       <section className="bonus-card">
-        <div><small>Ежедневный бонус</small><strong>+5 ⭐ каждый день</strong></div>
+        <div><small>Ежедневный бонус</small><strong>+1 ⭐ + билет за 7 дней</strong></div>
         <button type="button" onClick={() => { hapticTap(); onClaimBonus(); }}>Забрать</button>
       </section>
     </main>
@@ -960,7 +924,7 @@ function Roulette({
         winnerMultiplier = others[Math.floor(Math.random() * others.length)];
       }
       serverWon = winnerMultiplier === selected;
-      serverReward = serverWon ? safeBet * winnerMultiplier : 0;
+      serverReward = serverWon ? Math.floor(safeBet * winnerMultiplier) : 0;
       serverDelta = serverReward - safeBet;
       setBalance(prev => prev - safeBet + serverReward);
     } else {
@@ -2003,53 +1967,6 @@ function Coinfly({
         onClick={startFlip}>
         {flipping || busy ? 'Подбрасываем...' : `Подбросить за ${Math.max(10, bet)} ⭐`}
       </button>
-    </main>
-  );
-}
-
-/* =========================================================
-   QUESTS
-   ========================================================= */
-
-function Quests({
-  quests, setPage, onClaim,
-}: {
-  quests: Quest[];
-  setPage: (page: Page) => void;
-  onClaim: (id: string) => void;
-}) {
-  return (
-    <main>
-      <BackButton setPage={setPage} />
-      <div className="heading">
-        <small>MISSIONS</small>
-        <h1>Квесты</h1>
-        <p>Выполняй задания и получай бонусы.</p>
-      </div>
-
-      <div className="quests-list">
-        {quests.map((q) => {
-          const progress = Math.min(q.progress, q.goal);
-          const percent = Math.floor((progress / q.goal) * 100);
-          const complete = progress >= q.goal;
-          const disabled = !complete || q.claimed;
-          return (
-            <div className={`quest-row ${q.claimed ? 'claimed' : ''}`} key={q.id}>
-              <div className="quest-info">
-                <b>{q.name}</b>
-                <small>{progress} / {q.goal}</small>
-              </div>
-              <div className="quest-bar">
-                <div className="quest-bar-fill" style={{ width: `${percent}%` }} />
-              </div>
-              <button type="button" disabled={disabled} onClick={() => onClaim(q.id)}>
-                {q.claimed ? '✅' : complete ? `+${q.reward} ⭐` : `${percent}%`}
-              </button>
-            </div>
-          );
-        })}
-        {quests.length === 0 && <div className="empty">Квесты загружаются...</div>}
-      </div>
     </main>
   );
 }
