@@ -170,10 +170,10 @@ function App() {
   const [demoBalance, setDemoBalance] = useState(10000);
 
   const [topupOpen, setTopupOpen] = useState(false);
-  const [topupAmount, setTopupAmount] = useState(100);
-  const [topupLoading, setTopupLoading] = useState(false);
-  const [topupMethod, setTopupMethod] = useState<TopupMethod>('crypto');
-
+const [topupAmount, setTopupAmount] = useState(100);
+const [topupLoading, setTopupLoading] = useState(false);
+const [topupMethod, setTopupMethod] = useState<TopupMethod>('crypto');
+const [topupIsFirst, setTopupIsFirst] = useState(false);
   const [cryptoOpen, setCryptoOpen] = useState(false);
   const [cryptoData, setCryptoData] = useState<CryptoData | null>(null);
   const [cryptoWaiting, setCryptoWaiting] = useState(false);
@@ -349,11 +349,12 @@ function App() {
   }, [showToast, loadTicketInfo]);
 
   const openTopup = useCallback(() => {
-    hapticTap();
-    setTopupAmount(50);
-    setTopupMethod('crypto');
-    setTopupOpen(true);
-  }, []);
+  hapticTap();
+  setTopupAmount(50);
+  setTopupMethod('crypto');
+  setTopupIsFirst(false);
+  setTopupOpen(true);
+}, []);
 
   const handleTopup = useCallback(async () => {
     if (topupAmount < 10) { hapticError(); showToast('Минимум 10 ⭐'); return; }
