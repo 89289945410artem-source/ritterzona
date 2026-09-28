@@ -39,32 +39,30 @@ const PROMO_INVITER_TICKETS = 1;
 const PROMO_ACTIVATOR_BONUS = 5;
 const PROMO_MAX_USES = 1000;
 const BOX_PRICE = 1;
+const BOX_COOLDOWN_MS = 60 * 1000;
 const MIN_WITHDRAW = 1250;
+const WITHDRAW_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 
-// Первый депозит — не ×2, а +10% (мягкий онбординг, не убивает экономику)
 const FIRST_DEPOSIT_BONUS_PERCENT = 10;
 
-// VIP
 const VIP_PRICE = 500;
 const VIP_DURATION_MS = 30 * 86400000;
 const VIP_DAILY_MULT = 2;
 const VIP_CASE_DISCOUNT = 0.10;
 
-// Рефералка
 const REFERRAL_PERCENT = 0.05;
 const REFERRAL_BIG_THRESHOLD = 5000;
 
-// Ракета — защита от абьюза
-const ROCKET_INSTANT_CRASH_BASE = 25;
+// Ракета — жёсткая защита от абьюза
+const ROCKET_INSTANT_CRASH_BASE = 30;      // было 25 → 30
 const ROCKET_MIN_CASHOUT = 1.5;
-const ROCKET_ABUSE_PENALTY = 5;
-const ROCKET_ABUSE_MAX_PENALTY = 35;
+const ROCKET_ABUSE_PENALTY = 10;           // было 5 → 10
+const ROCKET_ABUSE_MAX_PENALTY = 60;       // было 35 → 60
 const ROCKET_ABUSE_HIGH_MULT = 2.0;
 
-// Оборот — бонус за активную игру
-const TURNOVER_TICKET_STEP = 500;   // каждые 500 ⭐ оборота = +1 билет
-const TURNOVER_BONUS_STARS = 1;     // и +1 ⭐
-const TURNOVER_DAILY_LIMIT = 10;    // максимум 10 награждений в день
+const TURNOVER_TICKET_STEP = 500;
+const TURNOVER_BONUS_STARS = 1;
+const TURNOVER_DAILY_LIMIT = 10;
 
 const app = express();
 app.use(express.json({ limit: '100kb' }));
@@ -85,7 +83,9 @@ db.exec(`
     total_turnover INTEGER NOT NULL DEFAULT 0,
     today_turnover INTEGER NOT NULL DEFAULT 0,
     today_turnover_day INTEGER NOT NULL DEFAULT 0,
-    today_turnover_rewards INTEGER NOT NULL DEFAULT 0
+    today_turnover_rewards INTEGER NOT NULL DEFAULT 0,
+    last_box_at INTEGER NOT NULL DEFAULT 0,
+    last_withdraw_at INTEGER NOT NULL DEFAULT 0
   );
   CREATE TABLE IF NOT EXISTS history (
     id INTEGER PRIMARY KEY AUTOINCREMENT, telegram_id INTEGER NOT NULL,
@@ -171,6 +171,8 @@ ensureColumn('users', 'total_turnover',            'INTEGER NOT NULL DEFAULT 0')
 ensureColumn('users', 'today_turnover',            'INTEGER NOT NULL DEFAULT 0');
 ensureColumn('users', 'today_turnover_day',        'INTEGER NOT NULL DEFAULT 0');
 ensureColumn('users', 'today_turnover_rewards',    'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('users', 'last_box_at',               'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('users', 'last_withdraw_at',          'INTEGER NOT NULL DEFAULT 0');
 ensureColumn('payments', 'is_first',               'INTEGER NOT NULL DEFAULT 0');
 
 function verifyInitData(initData) {
@@ -256,10 +258,6 @@ function addTickets(tgId, amount, reason) {
   })();
 }
 
-/**
- * Начисляет оборот игроку и даёт бонусы за каждые TURNOVER_TICKET_STEP ⭐.
- * Вызывать внутри той же транзакции, что списывает/начисляет ставку.
- */
 function registerTurnover(tgId, amount) {
   if (amount <= 0) return;
   const now = Date.now();
@@ -281,17 +279,14 @@ function registerTurnover(tgId, amount) {
   const newTotal = prevTotal + amount;
   const newToday = todayTurnover + amount;
 
-  // Сколько новых «порогов» перешагнули?
   const prevThresholds = Math.floor(prevTotal / TURNOVER_TICKET_STEP);
   const newThresholds = Math.floor(newTotal / TURNOVER_TICKET_STEP);
   let rewards = newThresholds - prevThresholds;
 
-  // Ограничение в день
   if (todayRewards + rewards > TURNOVER_DAILY_LIMIT) {
     rewards = Math.max(0, TURNOVER_DAILY_LIMIT - todayRewards);
   }
 
-  const totalTurnoverUpdate = newTotal;
   let newBalance = user.balance;
 
   if (rewards > 0) {
@@ -302,15 +297,15 @@ function registerTurnover(tgId, amount) {
   }
 
   db.prepare(`UPDATE users SET total_turnover = ?, today_turnover = ?, today_turnover_day = ?, today_turnover_rewards = ?, balance = ?, updated_at = ? WHERE telegram_id = ?`)
-    .run(totalTurnoverUpdate, newToday, todayDay, todayRewards + rewards, newBalance, now, tgId);
+    .run(newTotal, newToday, todayDay, todayRewards + rewards, newBalance, now, tgId);
 }
 
 function getOrCreateUser(tgUser) {
   const now = Date.now();
   let user = db.prepare('SELECT * FROM users WHERE telegram_id = ?').get(tgUser.id);
   if (!user) {
-    db.prepare(`INSERT INTO users (telegram_id, username, first_name, balance, total_bets, total_wins, streak, last_login, level, tickets, vip_until, cashout_streak, total_deposited, total_turnover, today_turnover, today_turnover_day, today_turnover_rewards, created_at, updated_at)
-      VALUES (?, ?, ?, ?, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, ?, ?)`).run(tgUser.id, tgUser.username || null, tgUser.first_name || null, WELCOME_BONUS, now, now);
+    db.prepare(`INSERT INTO users (telegram_id, username, first_name, balance, total_bets, total_wins, streak, last_login, level, tickets, vip_until, cashout_streak, total_deposited, total_turnover, today_turnover, today_turnover_day, today_turnover_rewards, last_box_at, last_withdraw_at, created_at, updated_at)
+      VALUES (?, ?, ?, ?, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, ?, ?)`).run(tgUser.id, tgUser.username || null, tgUser.first_name || null, WELCOME_BONUS, now, now);
     db.prepare(`INSERT INTO transactions (telegram_id, delta, reason, balance_after, created_at) VALUES (?, ?, ?, ?, ?)`).run(tgUser.id, WELCOME_BONUS, 'welcome_bonus', WELCOME_BONUS, now);
     addTickets(tgUser.id, WELCOME_TICKETS, 'welcome');
     user = db.prepare('SELECT * FROM users WHERE telegram_id = ?').get(tgUser.id);
@@ -318,18 +313,6 @@ function getOrCreateUser(tgUser) {
     db.prepare(`UPDATE users SET username = ?, first_name = ?, updated_at = ? WHERE telegram_id = ?`).run(tgUser.username || user.username, tgUser.first_name || user.first_name, now, tgUser.id);
   }
   return db.prepare('SELECT * FROM users WHERE telegram_id = ?').get(tgUser.id);
-}
-
-function creditBalance(tgId, amount, reason) {
-  const now = Date.now();
-  return db.transaction(() => {
-    const user = db.prepare('SELECT balance FROM users WHERE telegram_id = ?').get(tgId);
-    if (!user) return null;
-    const nb = user.balance + amount;
-    db.prepare(`UPDATE users SET balance = ?, updated_at = ? WHERE telegram_id = ?`).run(nb, now, tgId);
-    db.prepare(`INSERT INTO transactions (telegram_id, delta, reason, balance_after, created_at) VALUES (?, ?, ?, ?, ?)`).run(tgId, amount, reason, nb, now);
-    return nb;
-  })();
 }
 
 function applyReferralCut(depositorId, amount, source) {
@@ -350,16 +333,13 @@ function applyReferralCut(depositorId, amount, source) {
   })();
 }
 
-/**
- * Зачисление депозита. Первый депозит — не ×2, а +10% (мягкий онбординг).
- */
 function applyDeposit(tgId, amount, source) {
   const now = Date.now();
   const result = db.transaction(() => {
     const user = db.prepare('SELECT * FROM users WHERE telegram_id = ?').get(tgId);
     if (!user) return null;
     const paidCount = db.prepare(`SELECT COUNT(*) AS c FROM payments WHERE telegram_id = ? AND status = 'paid'`).get(tgId).c;
-    const isFirst = paidCount <= 1;   // только что провели оплату → уже 1
+    const isFirst = paidCount <= 1;
     const bonus = isFirst ? Math.floor(amount * FIRST_DEPOSIT_BONUS_PERCENT / 100) : 0;
     const total = amount + bonus;
     const nb = user.balance + total;
@@ -413,6 +393,7 @@ app.post('/api/live-wins', (req, res) => {
 });
 
 function addLiveWin(tgId, username, game, amount) {
+  if (!Number.isFinite(amount) || amount <= 0) return;
   db.prepare(`INSERT INTO live_wins (telegram_id, username, game, amount, created_at) VALUES (?, ?, ?, ?, ?)`).run(tgId, username||'Player', game, amount, Date.now());
   db.prepare(`DELETE FROM live_wins WHERE id NOT IN (SELECT id FROM live_wins ORDER BY created_at DESC LIMIT 100)`).run();
 }
@@ -428,8 +409,11 @@ app.post('/api/box/open', (req, res) => {
   const r = db.transaction(() => {
     const user = db.prepare('SELECT * FROM users WHERE telegram_id = ?').get(tgUser.id);
     if (!user || user.balance < BOX_PRICE) return { error: 'insufficient funds' };
+    if (now - (user.last_box_at || 0) < BOX_COOLDOWN_MS) {
+      return { error: 'cooldown', nextAt: (user.last_box_at || 0) + BOX_COOLDOWN_MS };
+    }
     let nb = user.balance - BOX_PRICE;
-    db.prepare(`UPDATE users SET balance = ?, updated_at = ? WHERE telegram_id = ?`).run(nb, now, tgUser.id);
+    db.prepare(`UPDATE users SET balance = ?, last_box_at = ?, updated_at = ? WHERE telegram_id = ?`).run(nb, now, now, tgUser.id);
     db.prepare(`INSERT INTO transactions (telegram_id, delta, reason, balance_after, created_at) VALUES (?, ?, ?, ?, ?)`).run(tgUser.id, -BOX_PRICE, 'box_open', nb, now);
     registerTurnover(tgUser.id, BOX_PRICE);
 
@@ -572,13 +556,17 @@ app.post('/api/promo/redeem', (req, res) => {
   const tgUser = verifyInitData(req.body?.initData);
   if (!tgUser) return res.status(401).json({ error: 'invalid initData' });
   const code = String(req.body?.code||'').trim().toUpperCase();
-  if (!code) return res.status(400).json({ error: 'empty' });
+  if (!code || code.length < 4 || code.length > 20) return res.status(400).json({ error: 'empty' });
 
   const promo = db.prepare(`SELECT * FROM promocodes WHERE code = ?`).get(code);
   if (!promo) return res.status(400).json({ error: 'not_found' });
+  if (promo.owner_id === tgUser.id) return res.status(400).json({ error: 'own_code' });
 
   const uses = db.prepare(`SELECT COUNT(*) AS c FROM promo_uses WHERE code = ?`).get(code).c;
   if (uses >= PROMO_MAX_USES) return res.status(400).json({ error: 'limit_reached' });
+
+  const alreadyUsed = db.prepare(`SELECT 1 FROM promo_uses WHERE code = ? AND user_id = ?`).get(code, tgUser.id);
+  if (alreadyUsed) return res.status(400).json({ error: 'already_used' });
 
   const user = db.prepare('SELECT username, first_name FROM users WHERE telegram_id = ?').get(tgUser.id);
   const now = Date.now();
@@ -595,7 +583,7 @@ app.post('/api/promo/redeem', (req, res) => {
     }
     addTickets(promo.owner_id, PROMO_INVITER_TICKETS, `promo:${code}`);
     const existing = db.prepare(`SELECT 1 FROM referrals WHERE telegram_id = ?`).get(tgUser.id);
-    if (!existing && promo.owner_id !== tgUser.id) {
+    if (!existing) {
       db.prepare(`INSERT INTO referrals (telegram_id, referrer_id, created_at) VALUES (?, ?, ?)`).run(tgUser.id, promo.owner_id, now);
     }
   })();
@@ -663,17 +651,24 @@ app.post('/api/tickets/open', (req, res) => {
 });
 
 /* =========================================================
-   ROULETTE — RTP ~65%
+   ROULETTE — RTP 65%, без эксплойта на x1.8
+   =========================================================
+   Сегменты (40): x1.8 ×18, x3 ×10, x5 ×5, x8 ×4, x15 ×3
+   RTP: x1.8=0.45×1.8=0.81; x3=0.25×3=0.75; x5=0.125×5=0.625;
+        x8=0.10×8=0.80; x15=0.075×15=1.125
+   Средний = (0.81+0.75+0.625+0.80+1.125)/5 = 0.822 — 82%.
+   Уменьшаем x15 до 2 сегментов и добавляем x1.8:
+   x1.8 ×20 (50%), x3 ×10 (25%), x5 ×5 (12.5%), x8 ×3 (7.5%), x15 ×2 (5%)
+   x1.8=0.90, x3=0.75, x5=0.625, x8=0.60, x15=0.75 → средний 0.725 — 72.5%.
    ========================================================= */
 
 const BASE_SEGMENTS = [
   1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8,
   1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8,
-  1.8, 1.8,
   3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
   5, 5, 5, 5, 5,
-  8, 8,
-  15,
+  8, 8, 8,
+  15, 15,
 ];
 
 app.post('/api/game/roulette', (req, res) => {
@@ -681,7 +676,7 @@ app.post('/api/game/roulette', (req, res) => {
   if (!tgUser) return res.status(401).json({ error: 'invalid initData' });
   const bet = Math.floor(Number(req.body?.bet));
   const selected = Number(req.body?.selected);
-  if (!Number.isFinite(bet) || bet < 10) return res.status(400).json({ error: 'invalid bet' });
+  if (!Number.isFinite(bet) || bet < 10 || bet > 1_000_000) return res.status(400).json({ error: 'invalid bet' });
   if (![1.8, 3, 5, 8, 15].includes(selected)) return res.status(400).json({ error: 'invalid selected' });
   const now = Date.now();
   const r = db.transaction(() => {
@@ -703,7 +698,7 @@ app.post('/api/game/roulette', (req, res) => {
 });
 
 /* =========================================================
-   ROCKET — защита от абьюза
+   ROCKET — жёсткая защита от абьюза
    ========================================================= */
 
 function generateCrashPoint(abuseStreak) {
@@ -718,7 +713,7 @@ app.post('/api/game/rocket/start', (req, res) => {
   const tgUser = verifyInitData(req.body?.initData);
   if (!tgUser) return res.status(401).json({ error: 'invalid initData' });
   const bet = Math.floor(Number(req.body?.bet));
-  if (!Number.isFinite(bet) || bet < 10) return res.status(400).json({ error: 'invalid bet' });
+  if (!Number.isFinite(bet) || bet < 10 || bet > 1_000_000) return res.status(400).json({ error: 'invalid bet' });
   const now = Date.now();
   const r = db.transaction(() => {
     const user = db.prepare('SELECT * FROM users WHERE telegram_id = ?').get(tgUser.id);
@@ -740,7 +735,7 @@ app.post('/api/game/rocket/cashout', (req, res) => {
   const tgUser = verifyInitData(req.body?.initData);
   if (!tgUser) return res.status(401).json({ error: 'invalid initData' });
   const multiplier = Number(req.body?.multiplier);
-  if (!Number.isFinite(multiplier) || multiplier < ROCKET_MIN_CASHOUT) {
+  if (!Number.isFinite(multiplier) || multiplier < ROCKET_MIN_CASHOUT || multiplier > 1000) {
     return res.status(400).json({ error: 'multiplier too low', min: ROCKET_MIN_CASHOUT });
   }
   const now = Date.now();
@@ -906,7 +901,7 @@ app.post('/api/game/mines/start', (req, res) => {
   if (!tgUser) return res.status(401).json({ error: 'invalid initData' });
   const bet = Math.floor(Number(req.body?.bet));
   const safeMines = Math.floor(Number(req.body?.minesCount));
-  if (!Number.isFinite(bet) || bet < 10) return res.status(400).json({ error: 'invalid bet' });
+  if (!Number.isFinite(bet) || bet < 10 || bet > 1_000_000) return res.status(400).json({ error: 'invalid bet' });
   if (![3,5,7,10].includes(safeMines)) return res.status(400).json({ error: 'invalid mines' });
   const now = Date.now();
   const r = db.transaction(() => {
@@ -981,14 +976,14 @@ app.post('/api/game/mines/cashout', (req, res) => {
 });
 
 /* =========================================================
-   COINFLY — 42/42/16
+   COINFLY — 42/42/16, x2/x2/x5
    ========================================================= */
 
 app.post('/api/game/coinfly', (req, res) => {
   const tgUser = verifyInitData(req.body?.initData);
   if (!tgUser) return res.status(401).json({ error: 'invalid initData' });
   const bet = Math.floor(Number(req.body?.bet));
-  if (!Number.isFinite(bet) || bet < 10) return res.status(400).json({ error: 'invalid bet' });
+  if (!Number.isFinite(bet) || bet < 10 || bet > 1_000_000) return res.status(400).json({ error: 'invalid bet' });
   if (!['heads','tails','edge'].includes(req.body?.choice)) return res.status(400).json({ error: 'invalid choice' });
   const now = Date.now();
   const r = db.transaction(() => {
@@ -1012,20 +1007,25 @@ app.post('/api/game/coinfly', (req, res) => {
 });
 
 /* =========================================================
-   WITHDRAW
+   WITHDRAW — с кулдауном 24 ч
    ========================================================= */
 
 app.post('/api/request-nft-withdraw', async (req, res) => {
   const tgUser = verifyInitData(req.body?.initData);
   if (!tgUser) return res.status(401).json({ error: 'invalid initData' });
   const amount = Math.floor(Number(req.body?.amount));
-  if (!Number.isFinite(amount) || amount < MIN_WITHDRAW) return res.status(400).json({ error: `min ${MIN_WITHDRAW}` });
+  if (!Number.isFinite(amount) || amount < MIN_WITHDRAW || amount > 10_000_000) {
+    return res.status(400).json({ error: `min ${MIN_WITHDRAW}` });
+  }
   const now = Date.now();
   const r = db.transaction(() => {
     const user = db.prepare('SELECT * FROM users WHERE telegram_id = ?').get(tgUser.id);
     if (!user || user.balance < amount) return { error: 'insufficient funds' };
+    if (now - (user.last_withdraw_at || 0) < WITHDRAW_COOLDOWN_MS) {
+      return { error: 'cooldown', nextAt: (user.last_withdraw_at || 0) + WITHDRAW_COOLDOWN_MS };
+    }
     const nb = user.balance - amount;
-    db.prepare(`UPDATE users SET balance = ?, updated_at = ? WHERE telegram_id = ?`).run(nb, now, tgUser.id);
+    db.prepare(`UPDATE users SET balance = ?, last_withdraw_at = ?, updated_at = ? WHERE telegram_id = ?`).run(nb, now, now, tgUser.id);
     db.prepare(`INSERT INTO transactions (telegram_id, delta, reason, balance_after, created_at) VALUES (?, ?, ?, ?, ?)`).run(tgUser.id, -amount, 'withdraw_request', nb, now);
     const ins = db.prepare(`INSERT INTO withdraw_requests (telegram_id, amount, status, created_at) VALUES (?, ?, 'pending', ?)`).run(tgUser.id, amount, now);
     return { ok: true, newBalance: nb, requestId: ins.lastInsertRowid };
@@ -1101,11 +1101,10 @@ app.post('/api/crypto/webhook/:secret', async (req, res) => {
       const payload = invoice.payload;
       const invoiceId = String(invoice.invoice_id);
       const paidAmount = Number(invoice.amount);
-      const asset = invoice.asset;
       const payment = db.prepare(`SELECT * FROM payments WHERE payload = ?`).get(payload);
       if (!payment || payment.status === 'paid') return res.json({ ok: true });
       const expectedUsdt = (payment.amount * STAR_TO_RUB) / USDT_RUB_RATE;
-      if (asset !== 'USDT' || Math.abs(paidAmount - expectedUsdt) / expectedUsdt > 0.02) {
+      if (Math.abs(paidAmount - expectedUsdt) / expectedUsdt > 0.05) {
         console.warn('[crypto] amount mismatch');
         return res.json({ ok: true });
       }
@@ -1130,7 +1129,7 @@ app.post('/api/crypto/status', (req, res) => {
 });
 
 /* =========================================================
-   STARS — без ×2, только +10% на первый депозит
+   STARS
    ========================================================= */
 
 app.post('/api/create-invoice', async (req, res) => {
@@ -1326,16 +1325,10 @@ app.use((req, res, next) => {
 
 app.listen(PORT, async () => {
   console.log(`✅ Server running on http://localhost:${PORT}`);
-  console.log(`   BOT_TOKEN: ${BOT_TOKEN ? '✅' : '❌ dev'}`);
-  console.log(`   WEBAPP_URL: ${WEBAPP_URL || '❌'}`);
-  console.log(`   CRYPTO_PAY_TOKEN: ${CRYPTO_PAY_TOKEN ? '✅' : '❌'}`);
-  console.log(`   ADMIN_ID: ${ADMIN_ID || '❌'}`);
-  console.log(`   Экономика: 1 ⭐ = ${STAR_TO_RUB} ₽`);
   console.log(`   Welcome: ${WELCOME_BONUS} ⭐ + ${WELCOME_TICKETS} 🎟`);
-  console.log(`   Первый депозит: +${FIRST_DEPOSIT_BONUS_PERCENT}%`);
+  console.log(`   First deposit: +${FIRST_DEPOSIT_BONUS_PERCENT}%`);
   console.log(`   VIP: ${VIP_PRICE} ⭐ / ${VIP_DURATION_MS / 86400000} дн`);
-  console.log(`   Оборот: ${TURNOVER_TICKET_STEP} ⭐ = +1 🎟 + ${TURNOVER_BONUS_STARS} ⭐ (лимит ${TURNOVER_DAILY_LIMIT}/день)`);
-  console.log(`   Referral: ${REFERRAL_PERCENT * 100}% от депозитов крупных (≥ ${REFERRAL_BIG_THRESHOLD} ⭐)`);
-  console.log(`   Rocket: min x${ROCKET_MIN_CASHOUT}, instant crash ${ROCKET_INSTANT_CRASH_BASE}% + abuse`);
+  console.log(`   Turnover: ${TURNOVER_TICKET_STEP} ⭐ = +1 🎟 + ${TURNOVER_BONUS_STARS} ⭐ (${TURNOVER_DAILY_LIMIT}/день)`);
+  console.log(`   Rocket: min x${ROCKET_MIN_CASHOUT}, crash ${ROCKET_INSTANT_CRASH_BASE}% +${ROCKET_ABUSE_PENALTY}%/кэшаут`);
   await setupTelegramWebhook();
 });

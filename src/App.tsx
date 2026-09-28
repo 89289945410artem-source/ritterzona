@@ -3,18 +3,14 @@ import type { CSSProperties } from 'react';
 import './appStyles.css';
 import { hapticSuccess, hapticError, hapticTap, getTelegramUser, initTelegram } from './telegram';
 
-type Page = 'home' | 'roulette' | 'rocket' | 'cases' | 'mines' | 'coinfly' | 'promo' | 'tickets' | 'bonus';
-type Multiplier = 1.8 | 3 | 5 | 8 | 20;
+type Page = 'home' | 'roulette' | 'rocket' | 'cases' | 'mines' | 'coinfly' | 'promo' | 'tickets' | 'bonus' | 'vip';
+type Multiplier = 1.8 | 3 | 5 | 8 | 15;
 
 type HistoryItem = { id: number; game: string; text: string; amount: number; win: boolean };
 type Segment = { id: number; multiplier: Multiplier; color: string };
 type Rarity = 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary';
 const RARITY_LABEL: Record<Rarity, string> = {
-  common: 'Обычный',
-  uncommon: 'Необычный',
-  rare: 'Редкий',
-  epic: 'Эпический',
-  legendary: 'Легендарный',
+  common: 'Обычный', uncommon: 'Необычный', rare: 'Редкий', epic: 'Эпический', legendary: 'Легендарный',
 };
 
 type Drop = { id: string; name: string; icon: string; price: number; color: string; rarity: Rarity };
@@ -25,10 +21,12 @@ type TicketCase = { id: string; name: string; tickets: number; color: string; ta
 type TopupMethod = 'stars' | 'crypto';
 type CryptoData = { invoiceId: number; payUrl: string; amountUsdt: string; amountStars: number; amountRub: number; payload: string };
 
-const MIN_WITHDRAW = 950;
+const MIN_WITHDRAW = 1250;
+const VIP_PRICE = 500;
+const ROCKET_MIN_CASHOUT = 1.5;
 
-const COLORS: Record<Multiplier, string> = { 1.8: '#9aa0ab', 3: '#ef4444', 5: '#3b82f6', 8: '#22c55e', 20: '#f59e0b' };
-const COLOR_NAMES: Record<Multiplier, string> = { 1.8: 'серый', 3: 'красный', 5: 'синий', 8: 'зелёный', 20: 'жёлтый' };
+const COLORS: Record<Multiplier, string> = { 1.8: '#9aa0ab', 3: '#ef4444', 5: '#3b82f6', 8: '#22c55e', 15: '#f59e0b' };
+const COLOR_NAMES: Record<Multiplier, string> = { 1.8: 'серый', 3: 'красный', 5: 'синий', 8: 'зелёный', 15: 'жёлтый' };
 
 const BASE_SEGMENTS: Multiplier[] = [
   1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8,
@@ -36,107 +34,93 @@ const BASE_SEGMENTS: Multiplier[] = [
   3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
   5, 5, 5, 5, 5,
   8, 8, 8,
-  20, 20,
+  15, 15,
 ];
 
 const CASES: GameCase[] = [
   { id: 'box', name: 'Box', price: 1, color: '#4ec97f', tagline: 'Шанс на билет',
     drops: [
-      { id: 'bx1', name: 'Билет 🎟', icon: '🎟', price: 0, color: '#a855f7', rarity: 'epic' },
+      { id: 'bx1', name: 'Билет', icon: '🎟', price: 0, color: '#a855f7', rarity: 'epic' },
       { id: 'bx2', name: '2 ⭐', icon: '🪙', price: 2, color: '#22d3ee', rarity: 'rare' },
-      { id: 'bx3', name: '3 ⭐', icon: '🪙', price: 3, color: '#22d3ee', rarity: 'rare' },
-      { id: 'bx4', name: '4 ⭐', icon: '🪙', price: 4, color: '#22d3ee', rarity: 'rare' },
-      { id: 'bx5', name: '5 ⭐', icon: '🪙', price: 5, color: '#22d3ee', rarity: 'uncommon' },
-      { id: 'bx6', name: 'Пусто', icon: '💣', price: 0, color: '#8b98b8', rarity: 'common' },
+      { id: 'bx3', name: 'Пусто', icon: '💣', price: 0, color: '#8b98b8', rarity: 'common' },
     ] },
-  { id: 'starter', name: 'Starter', price: 10, color: '#8b98b8', tagline: 'Первый шаг',
-    drops: [
-      { id: 'st1', name: 'Rusty Coin', icon: '🪙', price: 1, color: '#c7a56b', rarity: 'common' },
-      { id: 'st2', name: 'Copper Ring', icon: '💍', price: 4, color: '#e0a35f', rarity: 'uncommon' },
-      { id: 'st3', name: 'Small Gem', icon: '🔹', price: 12, color: '#6fd2ff', rarity: 'rare' },
-      { id: 'st4', name: 'Silver Star', icon: '⭐', price: 40, color: '#c18bff', rarity: 'epic' },
-      { id: 'st5', name: 'Blue Crystal', icon: '💎', price: 120, color: '#ffd13b', rarity: 'legendary' },
-    ] },
-  { id: 'bronze', name: 'Bronze', price: 25, color: '#c07840', tagline: 'Медный век',
-    drops: [
-      { id: 'b1', name: 'Bronze Coin', icon: '🪙', price: 3, color: '#e0a35f', rarity: 'common' },
-      { id: 'b2', name: 'Bronze Star', icon: '⭐', price: 10, color: '#55b3ff', rarity: 'uncommon' },
-      { id: 'b3', name: 'Orange Crystal', icon: '🔶', price: 30, color: '#42d1ff', rarity: 'rare' },
-      { id: 'b4', name: 'Small Crown', icon: '👑', price: 100, color: '#c18bff', rarity: 'epic' },
-      { id: 'b5', name: 'Red Gem', icon: '💎', price: 300, color: '#ffd13b', rarity: 'legendary' },
-    ] },
-  { id: 'lucky', name: 'Lucky', price: 49, color: '#4ec97f', tagline: 'Удача',
-    drops: [
-      { id: 'lk1', name: 'Lucky Coin', icon: '🍀', price: 5, color: '#8fd9a4', rarity: 'common' },
-      { id: 'lk2', name: 'Green Gem', icon: '💚', price: 20, color: '#55b3ff', rarity: 'uncommon' },
-      { id: 'lk3', name: 'Four Leaf', icon: '🍀', price: 60, color: '#42d1ff', rarity: 'rare' },
-      { id: 'lk4', name: 'Golden Clover', icon: '🌟', price: 200, color: '#c18bff', rarity: 'epic' },
-      { id: 'lk5', name: 'JACKPOT', icon: '💰', price: 600, color: '#ffd13b', rarity: 'legendary' },
-    ] },
-  { id: 'silver', name: 'Silver', price: 100, color: '#a8b8d6', tagline: 'Серебро',
-    drops: [
-      { id: 's1', name: 'Silver Coin', icon: '🪙', price: 10, color: '#d4e0f0', rarity: 'common' },
-      { id: 's2', name: 'Silver Star', icon: '🌟', price: 40, color: '#55b3ff', rarity: 'uncommon' },
-      { id: 's3', name: 'Blue Crystal', icon: '🔷', price: 120, color: '#42d1ff', rarity: 'rare' },
-      { id: 's4', name: 'Silver Crown', icon: '👑', price: 400, color: '#c18bff', rarity: 'epic' },
-      { id: 's5', name: 'Ice Gem', icon: '💎', price: 1200, color: '#ffd13b', rarity: 'legendary' },
-    ] },
-  { id: 'gold', name: 'Gold', price: 250, color: '#ffd13b', tagline: 'Золото',
-    drops: [
-      { id: 'g1', name: 'Gold Coin', icon: '🪙', price: 25, color: '#ffe071', rarity: 'common' },
-      { id: 'g2', name: 'Gold Star', icon: '🌟', price: 100, color: '#55b3ff', rarity: 'uncommon' },
-      { id: 'g3', name: 'Gold Crystal', icon: '🔶', price: 300, color: '#42d1ff', rarity: 'rare' },
-      { id: 'g4', name: 'Golden Crown', icon: '👑', price: 1000, color: '#c18bff', rarity: 'epic' },
-      { id: 'g5', name: 'Dragon Gem', icon: '🐉', price: 3000, color: '#ffd13b', rarity: 'legendary' },
-    ] },
-  { id: 'platinum', name: 'Platinum', price: 500, color: '#8fd7d7', tagline: 'Платина',
-    drops: [
-      { id: 'p1', name: 'Platinum Chip', icon: '💠', price: 50, color: '#b8e8e8', rarity: 'common' },
-      { id: 'p2', name: 'Platinum Star', icon: '✨', price: 200, color: '#55b3ff', rarity: 'uncommon' },
-      { id: 'p3', name: 'Frost Crystal', icon: '❄️', price: 600, color: '#42d1ff', rarity: 'rare' },
-      { id: 'p4', name: 'Platinum Crown', icon: '👑', price: 2000, color: '#c18bff', rarity: 'epic' },
-      { id: 'p5', name: 'Frozen Heart', icon: '💎', price: 6000, color: '#ffd13b', rarity: 'legendary' },
-    ] },
-  { id: 'diamond', name: 'Diamond', price: 1000, color: '#7fd4ff', tagline: 'Алмаз',
-    drops: [
-      { id: 'd1', name: 'Diamond Chip', icon: '💎', price: 100, color: '#a8e5ff', rarity: 'common' },
-      { id: 'd2', name: 'Diamond Star', icon: '⭐', price: 400, color: '#55b3ff', rarity: 'uncommon' },
-      { id: 'd3', name: 'Aqua Gem', icon: '🔷', price: 1200, color: '#42d1ff', rarity: 'rare' },
-      { id: 'd4', name: 'Diamond Crown', icon: '👑', price: 4000, color: '#c18bff', rarity: 'epic' },
-      { id: 'd5', name: 'Ocean Heart', icon: '💠', price: 12000, color: '#ffd13b', rarity: 'legendary' },
-    ] },
-  { id: 'royal', name: 'Royal', price: 2500, color: '#b28fff', tagline: 'Королевский',
-    drops: [
-      { id: 'r1', name: 'Royal Chip', icon: '🟣', price: 250, color: '#d4bfff', rarity: 'common' },
-      { id: 'r2', name: 'Royal Star', icon: '🌟', price: 1000, color: '#55b3ff', rarity: 'uncommon' },
-      { id: 'r3', name: 'Purple Crystal', icon: '🔮', price: 3000, color: '#42d1ff', rarity: 'rare' },
-      { id: 'r4', name: 'Royal Crown', icon: '👑', price: 10000, color: '#c18bff', rarity: 'epic' },
-      { id: 'r5', name: 'King Heart', icon: '💜', price: 30000, color: '#ffd13b', rarity: 'legendary' },
-    ] },
-  { id: 'cosmic', name: 'Cosmic', price: 5000, color: '#7a6bff', tagline: 'Космос',
-    drops: [
-      { id: 'c1', name: 'Star Dust', icon: '✨', price: 500, color: '#b3aaff', rarity: 'common' },
-      { id: 'c2', name: 'Cosmic Gem', icon: '🌌', price: 2000, color: '#55b3ff', rarity: 'uncommon' },
-      { id: 'c3', name: 'Nebula Crystal', icon: '🌠', price: 6000, color: '#42d1ff', rarity: 'rare' },
-      { id: 'c4', name: 'Galaxy Crown', icon: '👑', price: 20000, color: '#c18bff', rarity: 'epic' },
-      { id: 'c5', name: 'Black Hole', icon: '🕳️', price: 60000, color: '#ffd13b', rarity: 'legendary' },
-    ] },
-  { id: 'dragon', name: 'Dragon', price: 10000, color: '#ff7a3d', tagline: 'Дракон',
-    drops: [
-      { id: 'dr1', name: 'Dragon Scale', icon: '🐲', price: 1000, color: '#ff9a6a', rarity: 'common' },
-      { id: 'dr2', name: 'Dragon Claw', icon: '🗡️', price: 4000, color: '#55b3ff', rarity: 'uncommon' },
-      { id: 'dr3', name: 'Dragon Eye', icon: '👁️', price: 12000, color: '#42d1ff', rarity: 'rare' },
-      { id: 'dr4', name: 'Dragon Crown', icon: '👑', price: 40000, color: '#c18bff', rarity: 'epic' },
-      { id: 'dr5', name: 'Dragon Heart', icon: '🐉', price: 120000, color: '#ffd13b', rarity: 'legendary' },
-    ] },
-  { id: 'legendary', name: 'Legendary', price: 25000, color: '#ffd13b', tagline: 'Легенда',
-    drops: [
-      { id: 'lg1', name: 'Legend Chip', icon: '🏅', price: 2500, color: '#ffe071', rarity: 'common' },
-      { id: 'lg2', name: 'Legend Star', icon: '🌟', price: 10000, color: '#55b3ff', rarity: 'uncommon' },
-      { id: 'lg3', name: 'Legend Crystal', icon: '🔱', price: 30000, color: '#42d1ff', rarity: 'rare' },
-      { id: 'lg4', name: 'Legend Crown', icon: '👑', price: 100000, color: '#c18bff', rarity: 'epic' },
-      { id: 'lg5', name: 'GOD TIER', icon: '💎', price: 300000, color: '#ffd13b', rarity: 'legendary' },
-    ] },
+  { id: 'starter', name: 'Starter', price: 10, color: '#8b98b8', tagline: 'Первый шаг', drops: [
+    { id: 'st1', name: 'Rusty Coin', icon: '🪙', price: 2, color: '#c7a56b', rarity: 'common' },
+    { id: 'st2', name: 'Copper Ring', icon: '💍', price: 6, color: '#e0a35f', rarity: 'uncommon' },
+    { id: 'st3', name: 'Small Gem', icon: '🔹', price: 15, color: '#6fd2ff', rarity: 'rare' },
+    { id: 'st4', name: 'Silver Star', icon: '⭐', price: 50, color: '#c18bff', rarity: 'epic' },
+    { id: 'st5', name: 'Blue Crystal', icon: '💎', price: 150, color: '#ffd13b', rarity: 'legendary' },
+  ]},
+  { id: 'bronze', name: 'Bronze', price: 25, color: '#c07840', tagline: 'Медный век', drops: [
+    { id: 'b1', name: 'Bronze Coin', icon: '🪙', price: 5, color: '#e0a35f', rarity: 'common' },
+    { id: 'b2', name: 'Bronze Star', icon: '⭐', price: 15, color: '#55b3ff', rarity: 'uncommon' },
+    { id: 'b3', name: 'Orange Crystal', icon: '🔶', price: 40, color: '#42d1ff', rarity: 'rare' },
+    { id: 'b4', name: 'Small Crown', icon: '👑', price: 120, color: '#c18bff', rarity: 'epic' },
+    { id: 'b5', name: 'Red Gem', icon: '💎', price: 400, color: '#ffd13b', rarity: 'legendary' },
+  ]},
+  { id: 'lucky', name: 'Lucky', price: 49, color: '#4ec97f', tagline: 'Удача', drops: [
+    { id: 'lk1', name: 'Lucky Coin', icon: '🍀', price: 10, color: '#8fd9a4', rarity: 'common' },
+    { id: 'lk2', name: 'Green Gem', icon: '💚', price: 30, color: '#55b3ff', rarity: 'uncommon' },
+    { id: 'lk3', name: 'Four Leaf', icon: '🍀', price: 75, color: '#42d1ff', rarity: 'rare' },
+    { id: 'lk4', name: 'Golden Clover', icon: '🌟', price: 240, color: '#c18bff', rarity: 'epic' },
+    { id: 'lk5', name: 'JACKPOT', icon: '💰', price: 750, color: '#ffd13b', rarity: 'legendary' },
+  ]},
+  { id: 'silver', name: 'Silver', price: 100, color: '#a8b8d6', tagline: 'Серебро', drops: [
+    { id: 's1', name: 'Silver Coin', icon: '🪙', price: 20, color: '#d4e0f0', rarity: 'common' },
+    { id: 's2', name: 'Silver Star', icon: '🌟', price: 60, color: '#55b3ff', rarity: 'uncommon' },
+    { id: 's3', name: 'Blue Crystal', icon: '🔷', price: 150, color: '#42d1ff', rarity: 'rare' },
+    { id: 's4', name: 'Silver Crown', icon: '👑', price: 500, color: '#c18bff', rarity: 'epic' },
+    { id: 's5', name: 'Ice Gem', icon: '💎', price: 1500, color: '#ffd13b', rarity: 'legendary' },
+  ]},
+  { id: 'gold', name: 'Gold', price: 250, color: '#ffd13b', tagline: 'Золото', drops: [
+    { id: 'g1', name: 'Gold Coin', icon: '🪙', price: 50, color: '#ffe071', rarity: 'common' },
+    { id: 'g2', name: 'Gold Star', icon: '🌟', price: 150, color: '#55b3ff', rarity: 'uncommon' },
+    { id: 'g3', name: 'Gold Crystal', icon: '🔶', price: 400, color: '#42d1ff', rarity: 'rare' },
+    { id: 'g4', name: 'Golden Crown', icon: '👑', price: 1200, color: '#c18bff', rarity: 'epic' },
+    { id: 'g5', name: 'Dragon Gem', icon: '🐉', price: 4000, color: '#ffd13b', rarity: 'legendary' },
+  ]},
+  { id: 'platinum', name: 'Platinum', price: 500, color: '#8fd7d7', tagline: 'Платина', drops: [
+    { id: 'p1', name: 'Platinum Chip', icon: '💠', price: 100, color: '#b8e8e8', rarity: 'common' },
+    { id: 'p2', name: 'Platinum Star', icon: '✨', price: 300, color: '#55b3ff', rarity: 'uncommon' },
+    { id: 'p3', name: 'Frost Crystal', icon: '❄️', price: 800, color: '#42d1ff', rarity: 'rare' },
+    { id: 'p4', name: 'Platinum Crown', icon: '👑', price: 2400, color: '#c18bff', rarity: 'epic' },
+    { id: 'p5', name: 'Frozen Heart', icon: '💎', price: 8000, color: '#ffd13b', rarity: 'legendary' },
+  ]},
+  { id: 'diamond', name: 'Diamond', price: 1000, color: '#7fd4ff', tagline: 'Алмаз', drops: [
+    { id: 'd1', name: 'Diamond Chip', icon: '💎', price: 200, color: '#a8e5ff', rarity: 'common' },
+    { id: 'd2', name: 'Diamond Star', icon: '⭐', price: 600, color: '#55b3ff', rarity: 'uncommon' },
+    { id: 'd3', name: 'Aqua Gem', icon: '🔷', price: 1500, color: '#42d1ff', rarity: 'rare' },
+    { id: 'd4', name: 'Diamond Crown', icon: '👑', price: 5000, color: '#c18bff', rarity: 'epic' },
+    { id: 'd5', name: 'Ocean Heart', icon: '💠', price: 15000, color: '#ffd13b', rarity: 'legendary' },
+  ]},
+  { id: 'royal', name: 'Royal', price: 2500, color: '#b28fff', tagline: 'Королевский', drops: [
+    { id: 'r1', name: 'Royal Chip', icon: '🟣', price: 500, color: '#d4bfff', rarity: 'common' },
+    { id: 'r2', name: 'Royal Star', icon: '🌟', price: 1500, color: '#55b3ff', rarity: 'uncommon' },
+    { id: 'r3', name: 'Purple Crystal', icon: '🔮', price: 4000, color: '#42d1ff', rarity: 'rare' },
+    { id: 'r4', name: 'Royal Crown', icon: '👑', price: 12000, color: '#c18bff', rarity: 'epic' },
+    { id: 'r5', name: 'King Heart', icon: '💜', price: 40000, color: '#ffd13b', rarity: 'legendary' },
+  ]},
+  { id: 'cosmic', name: 'Cosmic', price: 5000, color: '#7a6bff', tagline: 'Космос', drops: [
+    { id: 'c1', name: 'Star Dust', icon: '✨', price: 1000, color: '#b3aaff', rarity: 'common' },
+    { id: 'c2', name: 'Cosmic Gem', icon: '🌌', price: 3000, color: '#55b3ff', rarity: 'uncommon' },
+    { id: 'c3', name: 'Nebula Crystal', icon: '🌠', price: 8000, color: '#42d1ff', rarity: 'rare' },
+    { id: 'c4', name: 'Galaxy Crown', icon: '👑', price: 24000, color: '#c18bff', rarity: 'epic' },
+    { id: 'c5', name: 'Black Hole', icon: '🕳️', price: 80000, color: '#ffd13b', rarity: 'legendary' },
+  ]},
+  { id: 'dragon', name: 'Dragon', price: 10000, color: '#ff7a3d', tagline: 'Дракон', drops: [
+    { id: 'dr1', name: 'Dragon Scale', icon: '🐲', price: 2000, color: '#ff9a6a', rarity: 'common' },
+    { id: 'dr2', name: 'Dragon Claw', icon: '🗡️', price: 6000, color: '#55b3ff', rarity: 'uncommon' },
+    { id: 'dr3', name: 'Dragon Eye', icon: '👁️', price: 15000, color: '#42d1ff', rarity: 'rare' },
+    { id: 'dr4', name: 'Dragon Crown', icon: '👑', price: 50000, color: '#c18bff', rarity: 'epic' },
+    { id: 'dr5', name: 'Dragon Heart', icon: '🐉', price: 150000, color: '#ffd13b', rarity: 'legendary' },
+  ]},
+  { id: 'legendary', name: 'Legendary', price: 25000, color: '#ffd13b', tagline: 'Легенда', drops: [
+    { id: 'lg1', name: 'Legend Chip', icon: '🏅', price: 5000, color: '#ffe071', rarity: 'common' },
+    { id: 'lg2', name: 'Legend Star', icon: '🌟', price: 15000, color: '#55b3ff', rarity: 'uncommon' },
+    { id: 'lg3', name: 'Legend Crystal', icon: '🔱', price: 40000, color: '#42d1ff', rarity: 'rare' },
+    { id: 'lg4', name: 'Legend Crown', icon: '👑', price: 120000, color: '#c18bff', rarity: 'epic' },
+    { id: 'lg5', name: 'GOD TIER', icon: '💎', price: 400000, color: '#ffd13b', rarity: 'legendary' },
+  ]},
 ];
 
 function shuffle<T>(items: T[]): T[] {
@@ -169,11 +153,14 @@ function App() {
   const [demoMode, setDemoMode] = useState(false);
   const [demoBalance, setDemoBalance] = useState(10000);
 
+  const [vip, setVip] = useState(false);
+  const [vipUntil, setVipUntil] = useState(0);
+
   const [topupOpen, setTopupOpen] = useState(false);
-const [topupAmount, setTopupAmount] = useState(100);
-const [topupLoading, setTopupLoading] = useState(false);
-const [topupMethod, setTopupMethod] = useState<TopupMethod>('crypto');
-const [topupIsFirst, setTopupIsFirst] = useState(false);
+  const [topupAmount, setTopupAmount] = useState(100);
+  const [topupLoading, setTopupLoading] = useState(false);
+  const [topupMethod, setTopupMethod] = useState<TopupMethod>('crypto');
+  const [topupIsFirst, setTopupIsFirst] = useState(false);
 
   const [cryptoOpen, setCryptoOpen] = useState(false);
   const [cryptoData, setCryptoData] = useState<CryptoData | null>(null);
@@ -199,12 +186,37 @@ const [topupIsFirst, setTopupIsFirst] = useState(false);
   const toastTimerRef = useRef<number | null>(null);
   const cryptoTimerRef = useRef<number | null>(null);
 
+  /* -------- СИНХРОНИЗАЦИЯ БАЛАНСА -------- */
+
+  const syncBalance = useCallback(async () => {
+    const initData = window.Telegram?.WebApp?.initData || '';
+    try {
+      const res = await fetch('/api/auth-telegram', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ initData }),
+      });
+      const data = await res.json();
+      if (data.profile) {
+        if (typeof data.profile.balance === 'number') setBalance(data.profile.balance);
+        if (typeof data.profile.tickets === 'number') setTickets(data.profile.tickets);
+        if (typeof data.profile.totalBets === 'number') setTotalBets(data.profile.totalBets);
+        if (typeof data.profile.streak === 'number') setStreak(data.profile.streak);
+        if (typeof data.profile.vip !== 'undefined') setVip(!!data.profile.vip);
+        if (typeof data.profile.vipUntil === 'number') setVipUntil(data.profile.vipUntil);
+      }
+    } catch {}
+  }, []);
+
   useEffect(() => { initTelegram(); }, []);
 
   useEffect(() => {
     function onBalance(e: Event) {
       const d = (e as CustomEvent).detail;
-      if (d && typeof d.balance === 'number') setBalance(d.balance);
+      if (d && typeof d.balance === 'number') {
+        setBalance(d.balance);
+        window.setTimeout(() => { void syncBalance(); }, 800);
+      }
     }
     function onHistory(e: Event) {
       const d = (e as CustomEvent).detail;
@@ -216,15 +228,21 @@ const [topupIsFirst, setTopupIsFirst] = useState(false);
       const d = (e as CustomEvent).detail;
       if (d) setLiveWins((items) => [{ ...d, created_at: Date.now() }, ...items].slice(0, 15));
     }
+    function onTickets(e: Event) {
+      const d = (e as CustomEvent).detail;
+      if (d && typeof d.tickets === 'number') setTickets(d.tickets);
+    }
     window.addEventListener('balance-update', onBalance);
     window.addEventListener('history-update', onHistory);
     window.addEventListener('live-win', onLiveWin);
+    window.addEventListener('tickets-update', onTickets);
     return () => {
       window.removeEventListener('balance-update', onBalance);
       window.removeEventListener('history-update', onHistory);
       window.removeEventListener('live-win', onLiveWin);
+      window.removeEventListener('tickets-update', onTickets);
     };
-  }, []);
+  }, [syncBalance]);
 
   const showToast = useCallback((text: string) => {
     if (toastTimerRef.current !== null) { window.clearTimeout(toastTimerRef.current); toastTimerRef.current = null; }
@@ -264,6 +282,8 @@ const [topupIsFirst, setTopupIsFirst] = useState(false);
           setTotalBets(data.profile.totalBets || 0);
           setStreak(data.profile.streak || 0);
           setTickets(data.profile.tickets || 0);
+          setVip(!!data.profile.vip);
+          setVipUntil(data.profile.vipUntil || 0);
           setProfileReady(true);
         } else { setBalance(15); setProfileReady(true); }
       } catch {
@@ -304,6 +324,13 @@ const [topupIsFirst, setTopupIsFirst] = useState(false);
     return () => { cancelled = true; window.clearInterval(iv); };
   }, []);
 
+  // Автосинк каждые 5 сек
+  useEffect(() => {
+    if (!profileReady) return;
+    const iv = window.setInterval(() => { void syncBalance(); }, 5000);
+    return () => window.clearInterval(iv);
+  }, [profileReady, syncBalance]);
+
   const loadTicketInfo = useCallback(async () => {
     const initData = window.Telegram?.WebApp?.initData || '';
     try {
@@ -314,10 +341,7 @@ const [topupIsFirst, setTopupIsFirst] = useState(false);
     } catch {}
   }, []);
 
-  useEffect(() => {
-    if (!profileReady) return;
-    loadTicketInfo();
-  }, [profileReady, loadTicketInfo]);
+  useEffect(() => { if (profileReady) loadTicketInfo(); }, [profileReady, loadTicketInfo]);
 
   const loadPromoInfo = useCallback(async () => {
     const initData = window.Telegram?.WebApp?.initData || '';
@@ -349,13 +373,34 @@ const [topupIsFirst, setTopupIsFirst] = useState(false);
     finally { setSyncing(false); }
   }, [showToast, loadTicketInfo]);
 
+  const buyVip = useCallback(async () => {
+    hapticTap();
+    const initData = window.Telegram?.WebApp?.initData || '';
+    setSyncing(true);
+    try {
+      const res = await fetch('/api/vip/buy', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ initData }) });
+      const data = await res.json();
+      if (data.ok) {
+        setBalance(data.newBalance);
+        setVip(true);
+        setVipUntil(data.vipUntil);
+        hapticSuccess();
+        showToast('👑 VIP активирован');
+      } else {
+        hapticError();
+        showToast(data.error === 'insufficient_funds' ? 'Недостаточно ⭐' : 'Ошибка');
+      }
+    } catch { hapticError(); showToast('Ошибка сети'); }
+    finally { setSyncing(false); }
+  }, [showToast]);
+
   const openTopup = useCallback(() => {
-  hapticTap();
-  setTopupAmount(50);
-  setTopupMethod('crypto');
-  setTopupIsFirst(false);
-  setTopupOpen(true);
-}, []);
+    hapticTap();
+    setTopupAmount(50);
+    setTopupMethod('crypto');
+    setTopupIsFirst(false);
+    setTopupOpen(true);
+  }, []);
 
   const handleTopup = useCallback(async () => {
     if (topupAmount < 10) { hapticError(); showToast('Минимум 10 ⭐'); return; }
@@ -366,11 +411,12 @@ const [topupIsFirst, setTopupIsFirst] = useState(false);
         const res = await fetch('/api/create-invoice', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ initData, amount: topupAmount }) });
         const data = await res.json();
         if (!res.ok || data.error) { hapticError(); showToast(data.error || 'Ошибка'); return; }
+        if (typeof data.isFirst !== 'undefined') setTopupIsFirst(!!data.isFirst);
         if (data.dev && typeof data.balance === 'number') {
           setBalance(data.balance);
           hapticSuccess();
           setTopupOpen(false);
-          showToast(`✅ +${data.amount} ⭐ (dev)`);
+          showToast(`✅ +${data.amount}${data.bonus ? ` +${data.bonus} бонус` : ''} ⭐`);
           return;
         }
         if (data.invoiceLink && window.Telegram?.WebApp?.openInvoice) {
@@ -452,7 +498,15 @@ const [topupIsFirst, setTopupIsFirst] = useState(false);
         setBalance(data.newBalance);
         setNftOpen(false);
         showToast('🎁 Заявка создана');
-      } else { hapticError(); showToast(data.error || 'Ошибка'); }
+      } else {
+        hapticError();
+        if (data.error === 'cooldown') {
+          const hours = Math.ceil((data.nextAt - Date.now()) / 3600000);
+          showToast(`Следующая заявка через ${hours} ч`);
+        } else {
+          showToast(data.error || 'Ошибка');
+        }
+      }
     } catch { hapticError(); showToast('Ошибка сети'); }
     finally { setNftLoading(false); }
   }, [balance, showToast]);
@@ -489,21 +543,18 @@ const [topupIsFirst, setTopupIsFirst] = useState(false);
         hapticSuccess();
         showToast(data.message);
         setPromoInput('');
-        const r2 = await fetch('/api/auth-telegram', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ initData }) });
-        const d2 = await r2.json();
-        if (d2.profile) { setBalance(d2.profile.balance); setTickets(d2.profile.tickets || 0); }
+        await syncBalance();
       } else {
         hapticError();
         const map: Record<string, string> = {
-          not_found: 'Код не найден',
-          empty: 'Введи код',
-          limit_reached: 'Код использован 1000 раз',
+          not_found: 'Код не найден', empty: 'Введи код', limit_reached: 'Код использован',
+          own_code: 'Нельзя активировать свой код', already_used: 'Ты уже активировал этот код',
         };
         showToast(map[data.error] || 'Ошибка');
       }
     } catch { hapticError(); showToast('Ошибка сети'); }
     finally { setPromoLoading(false); }
-  }, [promoInput, showToast]);
+  }, [promoInput, showToast, syncBalance]);
 
   const openPromoUsers = useCallback(async (code: string) => {
     hapticTap();
@@ -514,9 +565,7 @@ const [topupIsFirst, setTopupIsFirst] = useState(false);
       if (Array.isArray(data.users)) {
         setPromoUsers(data.users);
         setPromoUsersOpen(code);
-      } else {
-        showToast(data.error || 'Нет активаций');
-      }
+      } else showToast(data.error || 'Нет активаций');
     } catch { showToast('Ошибка сети'); }
   }, [showToast]);
 
@@ -560,6 +609,7 @@ const [topupIsFirst, setTopupIsFirst] = useState(false);
       <header className="topbar">
         <button type="button" className="logo" onContextMenu={(e) => e.preventDefault()} onClick={() => { hapticTap(); setPage('home'); }}>
           <span>R</span><b>RITTERZONA</b>
+          {vip && <em className="logo-vip-badge">VIP</em>}
         </button>
         <div className="balance">
           <small>{user?.first_name ?? 'Баланс'}</small>
@@ -570,30 +620,23 @@ const [topupIsFirst, setTopupIsFirst] = useState(false);
           className={`demo-toggle ${demoMode ? 'active' : ''}`}
           onClick={() => {
             hapticTap();
-            if (demoMode) {
-              setDemoMode(false);
-              showToast('Переключено');
-            } else {
-              if (demoBalance < 10) setDemoBalance(10000);
-              setDemoMode(true);
-              showToast('🎮 Бесплатная игра');
-            }
+            if (demoMode) { setDemoMode(false); showToast('Переключено'); }
+            else { if (demoBalance < 10) setDemoBalance(10000); setDemoMode(true); showToast('🎮 Бесплатная игра'); }
           }}
           title="Демо-режим"
-        >
-          🎮
-        </button>
+        >🎮</button>
       </header>
 
       <div key={page}>
-        {page === 'home' && <Home balance={demoMode ? demoBalance : balance} history={history} liveWins={liveWins} level={level} streak={streak} totalBets={totalBets} setPage={setPage} onTopup={openTopup} onNftWithdraw={openNftWithdraw} onBonus={() => setPage('bonus')} />}
+        {page === 'home' && <Home balance={demoMode ? demoBalance : balance} history={history} liveWins={liveWins} level={level} streak={streak} totalBets={totalBets} vip={vip} setPage={setPage} onTopup={openTopup} onNftWithdraw={openNftWithdraw} onBonus={() => setPage('bonus')} onVip={() => setPage('vip')} />}
         {page === 'roulette' && <Roulette balance={demoMode ? demoBalance : balance} setBalance={demoMode ? setDemoBalance : undefined} demoMode={demoMode} setPage={setPage} showToast={showToast} />}
         {page === 'rocket' && <Rocket balance={demoMode ? demoBalance : balance} setBalance={demoMode ? setDemoBalance : undefined} demoMode={demoMode} setPage={setPage} showToast={showToast} />}
-        {page === 'cases' && <Cases balance={demoMode ? demoBalance : balance} setBalance={demoMode ? setDemoBalance : undefined} demoMode={demoMode} setPage={setPage} showToast={showToast} />}
+        {page === 'cases' && <Cases balance={demoMode ? demoBalance : balance} setBalance={demoMode ? setDemoBalance : undefined} demoMode={demoMode} vip={vip} setPage={setPage} showToast={showToast} />}
         {page === 'mines' && <Mines balance={demoMode ? demoBalance : balance} setBalance={demoMode ? setDemoBalance : undefined} demoMode={demoMode} setPage={setPage} showToast={showToast} />}
         {page === 'coinfly' && <Coinfly balance={demoMode ? demoBalance : balance} setBalance={demoMode ? setDemoBalance : undefined} demoMode={demoMode} setPage={setPage} showToast={showToast} />}
         {page === 'tickets' && <Tickets tickets={tickets} cases={ticketCases} opening={ticketOpening} onOpen={openTicketCase} setPage={setPage} />}
         {page === 'bonus' && <Bonus tickets={tickets} onPromo={openPromo} onClaimBonus={claimDailyBonus} onTickets={() => setPage('tickets')} setPage={setPage} />}
+        {page === 'vip' && <Vip vip={vip} vipUntil={vipUntil} onBuy={buyVip} setPage={setPage} balance={balance} />}
       </div>
 
       <nav className="bottom-menu" key="bottom-menu">
@@ -611,12 +654,15 @@ const [topupIsFirst, setTopupIsFirst] = useState(false);
             <button type="button" className="modal-close" onClick={() => setTopupOpen(false)}>✕</button>
             <div className="modal-emoji">💰</div>
             <h3>Пополнить баланс</h3>
-            <p className="modal-sub">1 ⭐ = 2 ₽. Минимум 10 ⭐.{topupIsFirst ? ' 🎉 +10% на первый депозит!' : ''}</p>
-<div className="topup-display">
-  <span>+</span>
-  <b>{topupIsFirst ? Math.floor(topupAmount * 1.1) : topupAmount}</b>
-  <span>⭐</span>
-</div>
+            <p className="modal-sub">
+              1 ⭐ = 2 ₽. Минимум 10 ⭐.
+              {topupIsFirst ? ' 🎉 +10% на первый депозит!' : ''}
+            </p>
+            <div className="topup-display">
+              <span>+</span>
+              <b>{topupIsFirst ? Math.floor(topupAmount * 1.1) : topupAmount}</b>
+              <span>⭐</span>
+            </div>
             <div className="topup-slider">
               <input type="range" min={10} max={5000} step={10} value={topupAmount} onChange={(e) => setTopupAmount(Number(e.target.value))} />
             </div>
@@ -649,10 +695,6 @@ const [topupIsFirst, setTopupIsFirst] = useState(false);
             <div className="modal-emoji">💎</div>
             <h3>Оплата CryptoBot</h3>
             <p className="modal-sub">К оплате: <b>{cryptoData.amountUsdt} USDT</b><br />Зачислим: <b>{cryptoData.amountStars} ⭐</b> ({cryptoData.amountRub} ₽)</p>
-            <div className="crypto-info">
-              <div className="crypto-row"><small>Сумма</small><b>{cryptoData.amountUsdt} USDT</b></div>
-              <div className="crypto-row"><small>Сеть</small><b>TON / USDT</b></div>
-            </div>
             {cryptoWaiting && <div className="crypto-waiting"><span className="crypto-spinner" />Ожидаем оплату...</div>}
             <button type="button" className="primary-button full" onClick={() => {
               if (window.Telegram?.WebApp?.openLink) window.Telegram.WebApp.openLink(cryptoData.payUrl);
@@ -682,7 +724,7 @@ const [topupIsFirst, setTopupIsFirst] = useState(false);
             <button type="button" className="modal-close" onClick={() => setPromoOpen(false)}>✕</button>
             <div className="modal-emoji">🎟</div>
             <h3>Промокоды</h3>
-            <p className="modal-sub">Отправь другу — он получит <b>+5 ⭐</b>, ты — <b>+1 билет</b>.<br />Один код работает <b>1000 раз</b>.</p>
+            <p className="modal-sub">Друг получит <b>+5 ⭐</b>, ты — <b>+1 билет</b> и <b>5% с его депозитов</b> (если он станет крупным).</p>
             <div className="promo-input-row">
               <input type="text" placeholder="RTR-XXXXXX" value={promoInput} onChange={(e) => setPromoInput(e.target.value.toUpperCase())} maxLength={10} />
               <button type="button" className="primary-button" disabled={promoLoading} onClick={redeemPromo}>Ввести</button>
@@ -693,7 +735,7 @@ const [topupIsFirst, setTopupIsFirst] = useState(false);
                 {promoList.map((p) => (
                   <div key={p.code} className="promo-row">
                     <b>{p.code}</b>
-                    <small>👥 {p.uniqueUsers} чел. · 🔄 {p.usesCount}/{p.maxUses}</small>
+                    <small>👥 {p.uniqueUsers} · 🔄 {p.usesCount}/{p.maxUses}</small>
                     <button type="button" onClick={() => openPromoUsers(p.code)}>👥</button>
                     <button type="button" onClick={async () => { await navigator.clipboard.writeText(p.code); showToast('Скопирован'); }}>📋</button>
                   </div>
@@ -730,13 +772,11 @@ const [topupIsFirst, setTopupIsFirst] = useState(false);
   );
 }
 
-/* =========================================================
-   HOME
-   ========================================================= */
+/* ============== HOME ============== */
 
 function Home({
-  balance, history, liveWins, level, streak, totalBets,
-  setPage, onTopup, onNftWithdraw, onBonus,
+  balance, history, liveWins, level, streak, totalBets, vip,
+  setPage, onTopup, onNftWithdraw, onBonus, onVip,
 }: {
   balance: number;
   history: HistoryItem[];
@@ -744,10 +784,12 @@ function Home({
   level: { current: { level: number; bets: number }; next: { level: number; bets: number } };
   streak: number;
   totalBets: number;
+  vip: boolean;
   setPage: (page: Page) => void;
   onTopup: () => void;
   onNftWithdraw: () => void;
   onBonus: () => void;
+  onVip: () => void;
 }) {
   const nextBets = level.next.bets - level.current.bets;
   const currentProgress = totalBets - level.current.bets;
@@ -758,14 +800,14 @@ function Home({
       <section className="hero">
         <span className="live">● LIVE · 1 284 игрока онлайн</span>
         <h1>Твоя удача.<br />Твои правила.</h1>
-        <p>6 игр · 12 кейсов · ежедневные джекпоты</p>
+        <p>{vip ? '👑 VIP активен' : '6 игр · 12 кейсов · ежедневные джекпоты'}</p>
         <button type="button" className="primary-button" onClick={() => { hapticTap(); setPage('cases'); }}>Открыть первый кейс →</button>
       </section>
 
       <section className="level-card">
         <div className="level-header">
           <div><small>УРОВЕНЬ</small><strong>LVL {level.current.level}</strong></div>
-          <div className="level-streak"><small>STREAK</small><strong>🔥 {streak} дн.</strong></div>
+          <div className="level-streak"><small>STREAK</small><strong>🔥 {streak}</strong></div>
         </div>
         <div className="level-bar"><div className="level-bar-fill" style={{ width: `${progress}%` }} /></div>
         <div className="level-hint">{totalBets} / {level.next.bets} ставок до LVL {level.next.level}</div>
@@ -776,9 +818,27 @@ function Home({
         <button type="button" onClick={() => { hapticTap(); onTopup(); }}>Пополнить</button>
       </section>
 
+      {!vip && (
+        <section className="bonus-card" onClick={onVip}>
+          <div><small>👑 VIP-подписка</small><strong>500 ⭐ / 30 дней</strong></div>
+          <button type="button" onClick={(e) => { e.stopPropagation(); onVip(); }}>Оформить</button>
+        </section>
+      )}
+
+      {vip && (
+        <section className="bonus-card" onClick={onVip}>
+          <div><small>👑 VIP активен</small><strong>×2 бонусы · скидка 10%</strong></div>
+          <button type="button" onClick={(e) => { e.stopPropagation(); onVip(); }}>Продлить</button>
+        </section>
+      )}
+
       <section className="bonus-card" onClick={onBonus}>
-        <div><small>🎁 Бонусы</small><strong>Промокоды · Билеты · Streak</strong></div>
+        <div><small>🎁 Бонусы</small><strong>Промокоды · Билеты · Daily</strong></div>
         <button type="button" onClick={(e) => { e.stopPropagation(); onBonus(); }}>Открыть</button>
+      </section>
+
+      <section className="bonus-card" style={{ borderColor: 'rgba(59,130,246,0.5)' }}>
+        <div><small>🔄 Оборот</small><strong>Каждые 500 ⭐ = 🎟 + 1 ⭐</strong></div>
       </section>
 
       <section className="withdraw-card">
@@ -788,24 +848,12 @@ function Home({
 
       <h2>Мини-игры</h2>
       <div className="game-grid">
-        <button type="button" onClick={() => { hapticTap(); setPage('cases'); }}>
-          <span className="game-icon blue">🎁</span><b>Кейсы</b><small>Открывай награды</small>
-        </button>
-        <button type="button" onClick={() => { hapticTap(); setPage('roulette'); }}>
-          <span className="game-icon purple">🎯</span><b>Рулетка</b><small>Угадай цвет</small>
-        </button>
-        <button type="button" onClick={() => { hapticTap(); setPage('rocket'); }}>
-          <span className="game-icon orange">🚀</span><b>Ракета</b><small>Успей забрать</small>
-        </button>
-        <button type="button" onClick={() => { hapticTap(); setPage('mines'); }}>
-          <span className="game-icon green">💣</span><b>Сапёр</b><small>Открывай клетки</small>
-        </button>
-        <button type="button" onClick={() => { hapticTap(); setPage('coinfly'); }}>
-          <span className="game-icon orange">🪙</span><b>Монетка</b><small>Орёл или решка</small>
-        </button>
-        <button type="button" onClick={() => { hapticTap(); setPage('tickets'); }}>
-          <span className="game-icon purple">🎫</span><b>Билеты</b><small>Кейсы за билеты</small>
-        </button>
+        <button type="button" onClick={() => { hapticTap(); setPage('cases'); }}><span className="game-icon blue">🎁</span><b>Кейсы</b><small>Открывай награды</small></button>
+        <button type="button" onClick={() => { hapticTap(); setPage('roulette'); }}><span className="game-icon purple">🎯</span><b>Рулетка</b><small>Угадай цвет</small></button>
+        <button type="button" onClick={() => { hapticTap(); setPage('rocket'); }}><span className="game-icon orange">🚀</span><b>Ракета</b><small>Успей забрать</small></button>
+        <button type="button" onClick={() => { hapticTap(); setPage('mines'); }}><span className="game-icon green">💣</span><b>Сапёр</b><small>Открывай клетки</small></button>
+        <button type="button" onClick={() => { hapticTap(); setPage('coinfly'); }}><span className="game-icon orange">🪙</span><b>Монетка</b><small>Орёл или решка</small></button>
+        <button type="button" onClick={() => { hapticTap(); setPage('tickets'); }}><span className="game-icon purple">🎫</span><b>Билеты</b><small>Кейсы за билеты</small></button>
       </div>
 
       {liveWins.length > 0 && (
@@ -829,9 +877,7 @@ function Home({
   );
 }
 
-/* =========================================================
-   BONUS
-   ========================================================= */
+/* ============== BONUS ============== */
 
 function Bonus({
   tickets, onPromo, onClaimBonus, onTickets, setPage,
@@ -848,11 +894,11 @@ function Bonus({
       <div className="heading">
         <small>BONUS</small>
         <h1>Бонусы</h1>
-        <p>Промокоды, билеты, ежедневный streak.</p>
+        <p>Промокоды, билеты, ежедневный бонус.</p>
       </div>
 
       <section className="bonus-card" onClick={onPromo} style={{ marginTop: 16 }}>
-        <div><small>🎟 Промокоды</small><strong>+1 билет за активацию</strong></div>
+        <div><small>🎟 Промокоды</small><strong>+1 билет и 5% с депозитов</strong></div>
         <button type="button" onClick={(e) => { e.stopPropagation(); onPromo(); }}>Открыть</button>
       </section>
 
@@ -862,16 +908,55 @@ function Bonus({
       </section>
 
       <section className="bonus-card">
-        <div><small>Ежедневный бонус</small><strong>+1 ⭐ + билет за 7 дней</strong></div>
+        <div><small>Ежедневный бонус (раз в 2 дня)</small><strong>+1 ⭐ + билет за 7 дней</strong></div>
         <button type="button" onClick={() => { hapticTap(); onClaimBonus(); }}>Забрать</button>
       </section>
     </main>
   );
 }
 
-/* =========================================================
-   ROULETTE
-   ========================================================= */
+/* ============== VIP ============== */
+
+function Vip({
+  vip, vipUntil, onBuy, setPage, balance,
+}: {
+  vip: boolean;
+  vipUntil: number;
+  onBuy: () => void;
+  setPage: (page: Page) => void;
+  balance: number;
+}) {
+  const daysLeft = vip ? Math.max(0, Math.ceil((vipUntil - Date.now()) / 86400000)) : 0;
+  return (
+    <main>
+      <BackButton setPage={setPage} />
+      <div className="heading">
+        <small>VIP</small>
+        <h1>VIP-подписка</h1>
+        <p>{vip ? `Активна ещё ${daysLeft} дн.` : 'Премиум-преимущества'}</p>
+      </div>
+
+      <section className="vip-card">
+        <div className="vip-card-badge">👑 VIP</div>
+        <h2>Что даёт подписка</h2>
+        <ul className="vip-list">
+          <li><b>×2</b> к ежедневному бонусу</li>
+          <li><b>×2</b> шанс на билет в Box</li>
+          <li><b>−10%</b> скидка на все кейсы</li>
+          <li>Приоритетная поддержка</li>
+          <li>Особая метка в профиле</li>
+        </ul>
+        <div className="vip-price">500 ⭐ / 30 дней</div>
+        <button type="button" className="primary-button full" onClick={onBuy} disabled={balance < VIP_PRICE}>
+          {vip ? 'Продлить на 30 дней' : 'Активировать VIP'}
+        </button>
+        {balance < VIP_PRICE && <p className="vip-hint">Недостаточно звёзд. Пополни баланс.</p>}
+      </section>
+    </main>
+  );
+}
+
+/* ============== ROULETTE ============== */
 
 function Roulette({
   balance, setBalance, demoMode, setPage, showToast,
@@ -901,14 +986,12 @@ function Roulette({
     3: segments.filter((i) => i.multiplier === 3).length,
     5: segments.filter((i) => i.multiplier === 5).length,
     8: segments.filter((i) => i.multiplier === 8).length,
-    20: segments.filter((i) => i.multiplier === 20).length,
-}), [segments]);
+    15: segments.filter((i) => i.multiplier === 15).length,
+  }), [segments]);
 
   const wheelGradient = useMemo(() => {
     const stops: string[] = [];
-    segments.forEach((s, i) => {
-      stops.push(`${s.color} ${i * segmentSize}deg ${(i + 1) * segmentSize}deg`);
-    });
+    segments.forEach((s, i) => stops.push(`${s.color} ${i * segmentSize}deg ${(i + 1) * segmentSize}deg`));
     return `conic-gradient(from ${-segmentSize / 2}deg, ${stops.join(', ')})`;
   }, [segments, segmentSize]);
 
@@ -922,11 +1005,10 @@ function Roulette({
     let serverReward = 0, serverDelta = 0, serverWon = false;
 
     if (demoMode && setBalance) {
-      const winChance = Math.random() < 0.8;
-      if (winChance) {
-        winnerMultiplier = selected;
-      } else {
-        const others = ([1.8, 3, 5, 8, 20] as Multiplier[]).filter(m => m !== selected);
+      const winChance = Math.random() < 0.65;
+      if (winChance) winnerMultiplier = selected;
+      else {
+        const others = ([1.8, 3, 5, 8, 15] as Multiplier[]).filter(m => m !== selected);
         winnerMultiplier = others[Math.floor(Math.random() * others.length)];
       }
       serverWon = winnerMultiplier === selected;
@@ -936,20 +1018,10 @@ function Roulette({
     } else {
       try {
         const initData = window.Telegram?.WebApp?.initData || '';
-        const res = await fetch('/api/game/roulette', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ initData, bet: safeBet, selected }),
-        });
+        const res = await fetch('/api/game/roulette', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ initData, bet: safeBet, selected }) });
         const data = await res.json();
-        if (!res.ok || data.error) {
-          hapticError();
-          showToast(data.error === 'insufficient funds' ? 'Недостаточно ⭐' : 'Ошибка');
-          return;
-        }
-        if (typeof data.newBalance === 'number') {
-          window.dispatchEvent(new CustomEvent('balance-update', { detail: { balance: data.newBalance } }));
-        }
+        if (!res.ok || data.error) { hapticError(); showToast(data.error === 'insufficient funds' ? 'Недостаточно ⭐' : 'Ошибка'); return; }
+        if (typeof data.newBalance === 'number') window.dispatchEvent(new CustomEvent('balance-update', { detail: { balance: data.newBalance } }));
         winnerMultiplier = data.winner;
         serverReward = data.reward ?? 0;
         serverDelta = data.delta ?? 0;
@@ -985,13 +1057,10 @@ function Roulette({
     const serverData = serverResultRef.current;
     const winner = winnerRef.current;
     if (!winner || !serverData) { setSpinning(false); return; }
-
     setSpinning(false);
     setResult(winner);
-
     if (serverData.won) { hapticSuccess(); showToast(`Победа! +${serverData.reward} ⭐`); }
     else { hapticError(); showToast(`Выпал ${COLOR_NAMES[winner.multiplier]}`); }
-
     if (!demoMode) {
       window.dispatchEvent(new CustomEvent('history-update', {
         detail: { game: 'Рулетка', text: `Выпал ${COLOR_NAMES[winner.multiplier]}`, amount: serverData.delta, win: serverData.won },
@@ -1021,10 +1090,7 @@ function Roulette({
           {segments.map((s, i) => (
             <span key={`w-${i}-${s.multiplier}`} className="wheel-tick" style={{ transform: `rotate(${i * segmentSize}deg)` }} />
           ))}
-          <div className="wheel-center">
-            <b>R</b>
-            <small>{spinning ? 'WAIT' : result ? `x${result.multiplier}` : 'SPIN'}</small>
-          </div>
+          <div className="wheel-center"><b>R</b><small>{spinning ? 'WAIT' : result ? `x${result.multiplier}` : 'SPIN'}</small></div>
         </div>
         <div className="roulette-result">
           {result ? (<>Выпал <b style={{ color: result.color }}>{COLOR_NAMES[result.multiplier]}</b></>) : spinning ? 'Крутится...' : 'Сделай ставку'}
@@ -1034,7 +1100,7 @@ function Roulette({
       <BetBox bet={bet} setBet={setBet} disabled={spinning} balance={balance} />
 
       <div className="color-buttons">
-        {([1.8, 3, 5, 8, 20] as Multiplier[]).map((m) => (
+        {([1.8, 3, 5, 8, 15] as Multiplier[]).map((m) => (
           <button type="button" key={m} disabled={spinning}
             className={selected === m ? 'selected' : ''}
             style={{ borderColor: COLORS[m] }}
@@ -1046,23 +1112,16 @@ function Roulette({
         ))}
       </div>
 
-      <div className="selected-text">
-        Ставка на <b style={{ color: COLORS[selected] }}>{COLOR_NAMES[selected]}</b>{' · '}x{selected}
-      </div>
+      <div className="selected-text">Ставка на <b style={{ color: COLORS[selected] }}>{COLOR_NAMES[selected]}</b>{' · '}x{selected}</div>
 
-      <button type="button" className="primary-button full"
-        disabled={spinning || balance < Math.max(10, bet)} onClick={startSpin}>
+      <button type="button" className="primary-button full" disabled={spinning || balance < Math.max(10, bet)} onClick={startSpin}>
         {spinning ? 'Колесо крутится...' : `Запустить за ${Math.max(10, bet)} ⭐`}
       </button>
     </main>
   );
 }
 
-/* =========================================================
-   ROCKET
-   ========================================================= */
-
-const MIN_CASHOUT = 1.3;
+/* ============== ROCKET ============== */
 
 function Rocket({
   balance, setBalance, demoMode, setPage, showToast,
@@ -1079,6 +1138,7 @@ function Rocket({
   const [canCashOut, setCanCashOut] = useState(false);
   const [cashedOut, setCashedOut] = useState(false);
   const [crashed, setCrashed] = useState(false);
+  const [abuseWarning, setAbuseWarning] = useState(false);
 
   const intervalRef = useRef<number | null>(null);
   const crashTimerRef = useRef<number | null>(null);
@@ -1119,17 +1179,9 @@ function Rocket({
     } else {
       try {
         const initData = window.Telegram?.WebApp?.initData || '';
-        const res = await fetch('/api/game/rocket/start', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ initData, bet: safeBet }),
-        });
+        const res = await fetch('/api/game/rocket/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ initData, bet: safeBet }) });
         const data = await res.json();
-        if (!res.ok || data.error) {
-          hapticError();
-          showToast(data.error === 'insufficient funds' ? 'Недостаточно ⭐' : 'Ошибка');
-          return;
-        }
+        if (!res.ok || data.error) { hapticError(); showToast(data.error === 'insufficient funds' ? 'Недостаточно ⭐' : 'Ошибка'); return; }
         crashPoint = data.crashPoint;
         newBalance = data.newBalance;
         roundToken = data.roundToken;
@@ -1151,6 +1203,7 @@ function Rocket({
     setCanCashOut(false);
     setCashedOut(false);
     setCrashed(false);
+    setAbuseWarning(false);
 
     intervalRef.current = window.setInterval(() => {
       if (!mountedRef.current || !playingRef.current || roundRef.current !== roundId) return;
@@ -1159,7 +1212,9 @@ function Rocket({
       const next = Number(Math.min(crashPoint, raw).toFixed(2));
       multiplierRef.current = next;
       setMultiplier(next);
-      if (next >= MIN_CASHOUT) setCanCashOut(true);
+      if (next >= ROCKET_MIN_CASHOUT) setCanCashOut(true);
+      if (next < 2 && next >= ROCKET_MIN_CASHOUT) setAbuseWarning(true);
+      if (next >= 2) setAbuseWarning(false);
     }, 100);
 
     const crashDelay = Math.min(25000, Math.max(1500, (Math.log(crashPoint) / Math.log(1.06) / 2.4) * 1000));
@@ -1185,7 +1240,7 @@ function Rocket({
 
   const cashOut = async () => {
     if (!playingRef.current) { showToast('Сначала запусти'); return; }
-    if (!canCashOut) { hapticError(); showToast(`Минимум x${MIN_CASHOUT.toFixed(2)}`); return; }
+    if (!canCashOut) { hapticError(); showToast(`Минимум x${ROCKET_MIN_CASHOUT.toFixed(2)}`); return; }
     if (cashedOutRef.current) return;
     const currentMultiplier = multiplierRef.current;
     const token = roundTokenRef.current;
@@ -1208,11 +1263,7 @@ function Rocket({
 
     try {
       const initData = window.Telegram?.WebApp?.initData || '';
-      const res = await fetch('/api/game/rocket/cashout', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ initData, roundToken: token, multiplier: currentMultiplier }),
-      });
+      const res = await fetch('/api/game/rocket/cashout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ initData, roundToken: token, multiplier: currentMultiplier }) });
       const data = await res.json();
       if (!res.ok || data.error) {
         hapticError();
@@ -1233,9 +1284,13 @@ function Rocket({
       window.dispatchEvent(new CustomEvent('balance-update', { detail: { balance: data.newBalance } }));
       hapticSuccess();
       window.dispatchEvent(new CustomEvent('history-update', {
-        detail: { game: 'Ракета', text: `Вывод на x${currentMultiplier.toFixed(2)}`, amount: data.delta, win: true },
+        detail: { game: 'Ракета', text: `Вывод x${currentMultiplier.toFixed(2)}`, amount: data.delta, win: true },
       }));
-      showToast(`Забрали ${data.reward} ⭐`);
+      if (data.abuseStreak >= 3) {
+        showToast(`Забрали ${data.reward} ⭐. Внимание: шанс краха растёт!`);
+      } else {
+        showToast(`Забрали ${data.reward} ⭐`);
+      }
       roundTokenRef.current = null;
     } catch { hapticError(); showToast('Ошибка сети'); }
   };
@@ -1248,12 +1303,10 @@ function Rocket({
       <div className="heading">
         <small>GAME 02</small>
         <h1>Ракета</h1>
-        <p>Забери выигрыш до падения.</p>
+        <p>Мин. вывод x{ROCKET_MIN_CASHOUT.toFixed(2)}. Защита от абьюза активна.</p>
       </div>
-      <button type="button" className="primary-button full rocket-start-btn"
-        onClick={playing ? cashOut : startRocket}>
-        {playing ? (canCashOut ? `Забрать ${payout} ⭐` : `Ждём x${MIN_CASHOUT.toFixed(2)}...`)
-          : `Запустить за ${Math.max(10, bet)} ⭐`}
+      <button type="button" className="primary-button full rocket-start-btn" onClick={playing ? cashOut : startRocket}>
+        {playing ? (canCashOut ? `Забрать ${payout} ⭐` : `Ждём x${ROCKET_MIN_CASHOUT.toFixed(2)}...`) : `Запустить за ${Math.max(10, bet)} ⭐`}
       </button>
       <section className="rocket-box">
         <div className="rocket-multiplier">x{multiplier.toFixed(2)}</div>
@@ -1261,8 +1314,8 @@ function Rocket({
         <div className={playing ? 'rocket flying' : 'rocket'}>🚀</div>
         <div className="rocket-line" />
         <div className="rocket-info">
-          {playing && !canCashOut && `Ждём x${MIN_CASHOUT.toFixed(2)}...`}
-          {playing && canCashOut && 'Можно забрать'}
+          {playing && !canCashOut && `Ждём x${ROCKET_MIN_CASHOUT.toFixed(2)}...`}
+          {playing && canCashOut && (abuseWarning ? '⚠️ Кэшаут < x2 повышает шанс краха' : 'Можно забрать')}
           {!playing && crashed && 'Упала'}
           {!playing && cashedOut && 'Забран'}
           {!playing && !crashed && !cashedOut && 'Нажми кнопку'}
@@ -1273,16 +1326,15 @@ function Rocket({
   );
 }
 
-/* =========================================================
-   CASES
-   ========================================================= */
+/* ============== CASES ============== */
 
 function Cases({
-  balance, setBalance, demoMode, setPage, showToast,
+  balance, setBalance, demoMode, vip, setPage, showToast,
 }: {
   balance: number;
   setBalance?: (v: number | ((prev: number) => number)) => void;
   demoMode: boolean;
+  vip: boolean;
   setPage: (page: Page) => void;
   showToast: (text: string) => void;
 }) {
@@ -1298,11 +1350,9 @@ function Cases({
   const reelRef = useRef<HTMLDivElement | null>(null);
   const openingRef = useRef(false);
 
-  useEffect(() => {
-    return () => {
-      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
-      openingRef.current = false;
-    };
+  useEffect(() => () => {
+    if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+    openingRef.current = false;
   }, []);
 
   const WINNER_INDEX = 48;
@@ -1317,22 +1367,26 @@ function Cases({
     return items;
   };
 
+  const effectivePrice = vip && selectedCase.id !== 'box'
+    ? Math.ceil(selectedCase.price * 0.9)
+    : selectedCase.price;
+
   const openCase = async () => {
     if (openingRef.current) return;
-    if (balance < selectedCase.price) { hapticError(); showToast('Недостаточно ⭐'); return; }
+    if (balance < effectivePrice) { hapticError(); showToast('Недостаточно ⭐'); return; }
     hapticTap();
     if (timerRef.current !== null) { window.clearTimeout(timerRef.current); timerRef.current = null; }
 
     let serverResult: any = null;
 
     if (demoMode && setBalance) {
-      const winChance = Math.random() < 0.85;
+      const winChance = Math.random() < 0.78;
       const profitable = selectedCase.drops.filter(d => d.price > selectedCase.price);
       const cheap = selectedCase.drops.filter(d => d.price <= selectedCase.price);
       const chosen = winChance && profitable.length > 0
         ? profitable[Math.floor(Math.random() * profitable.length)]
         : (cheap.length > 0 ? cheap[Math.floor(Math.random() * cheap.length)] : selectedCase.drops[0]);
-      const delta = chosen.price - selectedCase.price;
+      const delta = chosen.price - effectivePrice;
       setBalance(prev => prev + delta);
       serverResult = {
         drop: { name: chosen.name, icon: chosen.icon, price: chosen.price, color: chosen.color, rarity: chosen.rarity },
@@ -1343,18 +1397,13 @@ function Cases({
       try {
         const initData = window.Telegram?.WebApp?.initData || '';
         const endpoint = selectedCase.id === 'box' ? '/api/box/open' : '/api/game/case';
-        const body = selectedCase.id === 'box'
-          ? { initData }
-          : { initData, caseId: selectedCase.id };
-        const res = await fetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        });
+        const body = selectedCase.id === 'box' ? { initData } : { initData, caseId: selectedCase.id };
+        const res = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         serverResult = await res.json();
         if (!res.ok || serverResult?.error) {
           hapticError();
-          showToast(serverResult?.error === 'insufficient funds' ? 'Недостаточно ⭐' : 'Ошибка');
+          showToast(serverResult?.error === 'insufficient funds' ? 'Недостаточно ⭐'
+            : serverResult?.error === 'cooldown' ? 'Подожди минуту' : 'Ошибка');
           return;
         }
       } catch { hapticError(); showToast('Ошибка сети'); return; }
@@ -1362,15 +1411,10 @@ function Cases({
 
     let finalDrop: Drop;
     if (selectedCase.id === 'box') {
-      if (serverResult.type === 'ticket') {
-        finalDrop = { id: 'box-ticket', name: 'Билет 🎟', icon: '🎟', price: 0, color: '#a855f7', rarity: 'epic' };
-      } else if (serverResult.type === 'refund') {
-        finalDrop = { id: 'box-refund', name: `${serverResult.reward} ⭐`, icon: '🪙', price: serverResult.reward, color: '#22d3ee', rarity: 'rare' };
-      } else if (serverResult.drop) {
-        finalDrop = { id: 'box-drop', name: serverResult.drop.name, icon: serverResult.drop.icon, price: serverResult.drop.price, color: serverResult.drop.color, rarity: serverResult.drop.rarity };
-      } else {
-        finalDrop = { id: 'box-redirect', name: 'Пусто', icon: '💣', price: 0, color: '#8b98b8', rarity: 'common' };
-      }
+      if (serverResult.type === 'ticket') finalDrop = { id: 'box-ticket', name: 'Билет 🎟', icon: '🎟', price: 0, color: '#a855f7', rarity: 'epic' };
+      else if (serverResult.type === 'refund') finalDrop = { id: 'box-refund', name: `${serverResult.reward} ⭐`, icon: '🪙', price: serverResult.reward, color: '#22d3ee', rarity: 'rare' };
+      else if (serverResult.drop) finalDrop = { id: 'box-drop', name: serverResult.drop.name, icon: serverResult.drop.icon, price: serverResult.drop.price, color: serverResult.drop.color, rarity: serverResult.drop.rarity };
+      else finalDrop = { id: 'box-redirect', name: 'Пусто', icon: '💣', price: 0, color: '#8b98b8', rarity: 'common' };
     } else {
       const sd = serverResult?.drop;
       finalDrop = sd
@@ -1403,7 +1447,7 @@ function Cases({
 
       const delta = selectedCase.id === 'box'
         ? (serverResult.type === 'refund' ? serverResult.reward - 1 : (serverResult.drop ? serverResult.delta : -1))
-        : (typeof serverResult?.delta === 'number' ? serverResult.delta : finalDrop.price - selectedCase.price);
+        : (typeof serverResult?.delta === 'number' ? serverResult.delta : finalDrop.price - effectivePrice);
 
       const newBalance = typeof serverResult?.newBalance === 'number' ? serverResult.newBalance : balance + delta;
       const isProfit = delta >= 0;
@@ -1420,14 +1464,21 @@ function Cases({
         window.dispatchEvent(new CustomEvent('history-update', {
           detail: { game: selectedCase.name, text: `${finalDrop.name} — ${finalDrop.price} ⭐`, amount: delta, win: isProfit },
         }));
+        if (serverResult.type === 'ticket') {
+          // синхронизировать билеты
+          const initData = window.Telegram?.WebApp?.initData || '';
+          fetch('/api/tickets/info', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ initData }) })
+            .then(r => r.json()).then(d => {
+              if (typeof d.tickets === 'number') window.dispatchEvent(new CustomEvent('tickets-update', { detail: { tickets: d.tickets } }));
+            }).catch(() => {});
+        }
       }
-
       const sign = delta > 0 ? '+' : '';
       showToast(isProfit ? `${finalDrop.name}: ${sign}${delta} ⭐` : `${finalDrop.name}: ${delta} ⭐`);
     }, 4200);
   };
 
-  const isPremiumCase = selectedCase.price >= 1000;
+  const isPremiumCase = effectivePrice >= 1000;
 
   return (
     <main>
@@ -1435,7 +1486,7 @@ function Cases({
       <div className="heading">
         <small>REWARDS</small>
         <h1>Кейсы</h1>
-        <p>Открывай и получай награды.</p>
+        <p>Открывай и получай награды.{vip ? ' 👑 VIP −10%' : ''}</p>
       </div>
 
       <div className="case-chips">
@@ -1451,7 +1502,7 @@ function Cases({
               <span className="case-chip-icon-body" style={{ background: item.color }}>{item.id === 'box' ? '📦' : '🎁'}</span>
             </span>
             <b>{item.name}</b>
-            <small>{item.price} ⭐</small>
+            <small>{vip && item.id !== 'box' ? Math.ceil(item.price * 0.9) : item.price} ⭐</small>
           </button>
         ))}
       </div>
@@ -1465,9 +1516,7 @@ function Cases({
             {selectedCase.tagline}
           </div>
           <h2 className="case-hero-title" style={{ ['--case-color' as string]: selectedCase.color }}>{selectedCase.name}</h2>
-          <div className="case-hero-meta">
-            <span>Цена: <b>{selectedCase.price} ⭐</b></span>
-          </div>
+          <div className="case-hero-meta"><span>Цена: <b>{effectivePrice} ⭐</b></span></div>
         </div>
 
         {opening && reel.length > 0 && (
@@ -1508,9 +1557,7 @@ function Cases({
           </div>
         )}
 
-        {opening && (
-          <div className="case-status-v2"><span className="case-status-v2-dot" />Открываем...</div>
-        )}
+        {opening && <div className="case-status-v2"><span className="case-status-v2-dot" />Открываем...</div>}
 
         {!opening && drop && (
           <div className={`drop-hero rarity-${drop.rarity}`} style={{ ['--r-color' as string]: drop.color }}>
@@ -1529,12 +1576,10 @@ function Cases({
           </div>
         )}
 
-        {!opening && !drop && (
-          <div className="case-status-v2 hint">Нажми «Открыть»</div>
-        )}
+        {!opening && !drop && <div className="case-status-v2 hint">Нажми «Открыть»</div>}
 
-        <button type="button" className="primary-button full case-open-btn" disabled={opening || balance < selectedCase.price} onClick={openCase}>
-          {opening ? 'Открытие...' : `Открыть за ${selectedCase.price} ⭐`}
+        <button type="button" className="primary-button full case-open-btn" disabled={opening || balance < effectivePrice} onClick={openCase}>
+          {opening ? 'Открытие...' : `Открыть за ${effectivePrice} ⭐`}
         </button>
       </section>
 
@@ -1558,11 +1603,7 @@ function Cases({
   );
 }
 
-/* =========================================================
-   MINES
-   ========================================================= */
-
-const MINES_FIELD_SIZE = 25;
+/* ============== MINES ============== */
 
 function Mines({
   balance, setBalance, demoMode, setPage, showToast,
@@ -1585,13 +1626,8 @@ function Mines({
   const [gameEnded, setGameEnded] = useState(false);
 
   const resetGame = useCallback(() => {
-    setRoundToken(null);
-    setOpened([]);
-    setMultiplier(1);
-    setPotentialReward(0);
-    setExploded(null);
-    setMinePositions([]);
-    setGameEnded(false);
+    setRoundToken(null); setOpened([]); setMultiplier(1); setPotentialReward(0);
+    setExploded(null); setMinePositions([]); setGameEnded(false);
   }, []);
 
   const startGame = async () => {
@@ -1601,40 +1637,18 @@ function Mines({
     setBusy(true);
 
     if (demoMode && setBalance) {
-      setBet(safeBet);
-      setRoundToken('demo_' + Date.now());
-      setOpened([]);
-      setMultiplier(1);
-      setPotentialReward(0);
-      setExploded(null);
-      setMinePositions([]);
-      setGameEnded(false);
-      setBalance(prev => prev - safeBet);
-      setBusy(false);
-      return;
+      setBet(safeBet); setRoundToken('demo_' + Date.now()); setOpened([]); setMultiplier(1);
+      setPotentialReward(0); setExploded(null); setMinePositions([]); setGameEnded(false);
+      setBalance(prev => prev - safeBet); setBusy(false); return;
     }
 
     try {
       const initData = window.Telegram?.WebApp?.initData || '';
-      const res = await fetch('/api/game/mines/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ initData, bet: safeBet, minesCount }),
-      });
+      const res = await fetch('/api/game/mines/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ initData, bet: safeBet, minesCount }) });
       const data = await res.json();
-      if (!res.ok || data.error) {
-        hapticError();
-        showToast(data.error === 'insufficient funds' ? 'Недостаточно ⭐' : 'Ошибка');
-        return;
-      }
-      setBet(safeBet);
-      setRoundToken(data.roundToken);
-      setOpened([]);
-      setMultiplier(1);
-      setPotentialReward(0);
-      setExploded(null);
-      setMinePositions([]);
-      setGameEnded(false);
+      if (!res.ok || data.error) { hapticError(); showToast(data.error === 'insufficient funds' ? 'Недостаточно ⭐' : 'Ошибка'); return; }
+      setBet(safeBet); setRoundToken(data.roundToken); setOpened([]); setMultiplier(1);
+      setPotentialReward(0); setExploded(null); setMinePositions([]); setGameEnded(false);
       window.dispatchEvent(new CustomEvent('balance-update', { detail: { balance: data.newBalance } }));
     } catch { hapticError(); showToast('Ошибка сети'); }
     finally { setBusy(false); }
@@ -1646,55 +1660,30 @@ function Mines({
     setBusy(true);
 
     if (demoMode && setBalance && roundToken.startsWith('demo_')) {
-      const safe = Math.random() < 0.88;
-      if (!safe) {
-        setExploded(cell);
-        setMinePositions([cell]);
-        setGameEnded(true);
-        setRoundToken(null);
-        hapticError();
-        showToast('💥 Взорвался');
-      } else {
+      const safe = Math.random() < 0.85;
+      if (!safe) { setExploded(cell); setMinePositions([cell]); setGameEnded(true); setRoundToken(null); hapticError(); showToast('💥 Взорвался'); }
+      else {
         const newOpened = [...opened, cell];
         setOpened(newOpened);
         const mult = 1 + newOpened.length * 0.2;
-        setMultiplier(mult);
-        setPotentialReward(Math.floor(bet * mult));
-        hapticSuccess();
+        setMultiplier(mult); setPotentialReward(Math.floor(bet * mult)); hapticSuccess();
       }
-      setBusy(false);
-      return;
+      setBusy(false); return;
     }
 
     try {
       const initData = window.Telegram?.WebApp?.initData || '';
-      const res = await fetch('/api/game/mines/open', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ initData, roundToken, cell }),
-      });
+      const res = await fetch('/api/game/mines/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ initData, roundToken, cell }) });
       const data = await res.json();
-      if (!res.ok || data.error) {
-        hapticError();
-        showToast(data.error || 'Ошибка');
-        return;
-      }
+      if (!res.ok || data.error) { hapticError(); showToast(data.error || 'Ошибка'); return; }
       if (data.mine) {
-        setExploded(cell);
-        setMinePositions(data.minePositions || []);
-        setGameEnded(true);
-        setRoundToken(null);
+        setExploded(cell); setMinePositions(data.minePositions || []); setGameEnded(true); setRoundToken(null);
         hapticError();
         window.dispatchEvent(new CustomEvent('balance-update', { detail: { balance: data.newBalance } }));
-        window.dispatchEvent(new CustomEvent('history-update', {
-          detail: { game: 'Сапёр', text: 'Взорвался', amount: data.delta, win: false },
-        }));
+        window.dispatchEvent(new CustomEvent('history-update', { detail: { game: 'Сапёр', text: 'Взорвался', amount: data.delta, win: false } }));
         showToast('💥 Взорвался');
       } else {
-        setOpened(data.opened);
-        setMultiplier(data.multiplier);
-        setPotentialReward(data.potentialReward);
-        hapticSuccess();
+        setOpened(data.opened); setMultiplier(data.multiplier); setPotentialReward(data.potentialReward); hapticSuccess();
       }
     } catch { hapticError(); showToast('Ошибка сети'); }
     finally { setBusy(false); }
@@ -1708,33 +1697,17 @@ function Mines({
     if (demoMode && setBalance && roundToken.startsWith('demo_')) {
       const reward = Math.floor(bet * multiplier);
       setBalance(prev => prev + reward);
-      hapticSuccess();
-      showToast(`✅ +${reward} ⭐`);
-      resetGame();
-      setBusy(false);
-      return;
+      hapticSuccess(); showToast(`✅ +${reward} ⭐`); resetGame(); setBusy(false); return;
     }
 
     try {
       const initData = window.Telegram?.WebApp?.initData || '';
-      const res = await fetch('/api/game/mines/cashout', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ initData, roundToken }),
-      });
+      const res = await fetch('/api/game/mines/cashout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ initData, roundToken }) });
       const data = await res.json();
-      if (!res.ok || data.error) {
-        hapticError();
-        showToast(data.error || 'Ошибка');
-        return;
-      }
+      if (!res.ok || data.error) { hapticError(); showToast(data.error || 'Ошибка'); return; }
       window.dispatchEvent(new CustomEvent('balance-update', { detail: { balance: data.newBalance } }));
-      window.dispatchEvent(new CustomEvent('history-update', {
-        detail: { game: 'Сапёр', text: `Забрал x${data.multiplier.toFixed(2)}`, amount: data.delta, win: true },
-      }));
-      hapticSuccess();
-      showToast(`✅ +${data.reward} ⭐`);
-      resetGame();
+      window.dispatchEvent(new CustomEvent('history-update', { detail: { game: 'Сапёр', text: `Забрал x${data.multiplier.toFixed(2)}`, amount: data.delta, win: true } }));
+      hapticSuccess(); showToast(`✅ +${data.reward} ⭐`); resetGame();
     } catch { hapticError(); showToast('Ошибка сети'); }
     finally { setBusy(false); }
   };
@@ -1759,16 +1732,15 @@ function Mines({
           <div className="mines-setup">
             <div className="mines-mines-picker">
               {([
-                { mines: 3,  label: 'Easy',    mult: 'x1.02' },
-                { mines: 5,  label: 'Normal',  mult: 'x1.12' },
-                { mines: 7,  label: 'Hard',    mult: 'x1.24' },
-                { mines: 10, label: 'Hi-Risk', mult: 'x1.49' },
+                { mines: 3,  label: 'Easy',    mult: 'x0.91' },
+                { mines: 5,  label: 'Normal',  mult: 'x1.00' },
+                { mines: 7,  label: 'Hard',    mult: 'x1.10' },
+                { mines: 10, label: 'Hi-Risk', mult: 'x1.33' },
               ] as const).map((opt) => (
                 <button type="button" key={opt.mines}
                   className={minesCount === opt.mines ? 'selected' : ''}
                   onClick={() => { hapticTap(); setMinesCount(opt.mines); }}>
-                  <b>{opt.mines} 💣</b>
-                  <small>{opt.label} · {opt.mult}</small>
+                  <b>{opt.mines} 💣</b><small>{opt.label} · {opt.mult}</small>
                 </button>
               ))}
             </div>
@@ -1782,24 +1754,18 @@ function Mines({
         {(roundToken || gameEnded) && (
           <>
             <div className="mines-grid">
-              {Array.from({ length: MINES_FIELD_SIZE }).map((_, i) => {
+              {Array.from({ length: 25 }).map((_, i) => {
                 const isOpened = opened.includes(i);
                 const isExploded = exploded === i;
                 const isMineShown = exploded !== null && minePositions.includes(i);
-
                 let className = 'mines-cell';
                 if (isExploded) className += ' mine';
                 else if (isMineShown) className += ' mine-revealed';
                 else if (isOpened) className += ' opened empty';
-
                 return (
-                  <button
-                    key={i}
-                    type="button"
-                    className={className}
+                  <button key={i} type="button" className={className}
                     disabled={busy || isOpened || exploded !== null || !roundToken}
-                    onClick={() => openCell(i)}
-                  >
+                    onClick={() => openCell(i)}>
                     {isExploded ? '💥' : isMineShown ? '💣' : isOpened ? '💎' : ''}
                   </button>
                 );
@@ -1812,11 +1778,7 @@ function Mines({
               </button>
             )}
 
-            {gameEnded && (
-              <button type="button" className="primary-button full" onClick={resetGame}>
-                Играть снова
-              </button>
-            )}
+            {gameEnded && <button type="button" className="primary-button full" onClick={resetGame}>Играть снова</button>}
           </>
         )}
       </section>
@@ -1824,9 +1786,7 @@ function Mines({
   );
 }
 
-/* =========================================================
-   COINFLY
-   ========================================================= */
+/* ============== COINFLY ============== */
 
 type CoinChoice = 'heads' | 'tails' | 'edge';
 
@@ -1850,11 +1810,7 @@ function Coinfly({
     if (busy || flipping) return;
     const safeBet = Math.max(10, Math.floor(Number(bet) || 10));
     if (balance < safeBet) { hapticError(); showToast('Недостаточно ⭐'); return; }
-
-    hapticTap();
-    setBusy(true);
-    setOutcome(null);
-    setWon(null);
+    hapticTap(); setBusy(true); setOutcome(null); setWon(null);
 
     let serverOutcome: CoinChoice | null = null;
     let serverWon = false;
@@ -1863,10 +1819,10 @@ function Coinfly({
     let serverDelta = 0;
 
     if (demoMode && setBalance) {
-      const winChance = Math.random() < 0.9;
+      const winChance = Math.random() < 0.42;
       serverOutcome = winChance ? choice : (choice === 'heads' ? 'tails' : 'heads');
       serverWon = serverOutcome === choice;
-      const multipliers = { heads: 2, tails: 2, edge: 9 };
+      const multipliers = { heads: 2, tails: 2, edge: 5 };
       serverReward = serverWon ? safeBet * multipliers[serverOutcome] : 0;
       serverDelta = serverReward - safeBet;
       serverNewBalance = balance - safeBet + serverReward;
@@ -1874,48 +1830,31 @@ function Coinfly({
     } else {
       try {
         const initData = window.Telegram?.WebApp?.initData || '';
-        const res = await fetch('/api/game/coinfly', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ initData, bet: safeBet, choice }),
-        });
+        const res = await fetch('/api/game/coinfly', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ initData, bet: safeBet, choice }) });
         const data = await res.json();
-        if (!res.ok || data.error) {
-          hapticError();
-          showToast(data.error === 'insufficient funds' ? 'Недостаточно ⭐' : 'Ошибка');
-          setBusy(false);
-          return;
-        }
-        serverOutcome = data.outcome;
-        serverWon = !!data.won;
-        serverReward = data.reward ?? 0;
-        serverNewBalance = data.newBalance ?? 0;
-        serverDelta = data.delta ?? 0;
+        if (!res.ok || data.error) { hapticError(); showToast(data.error === 'insufficient funds' ? 'Недостаточно ⭐' : 'Ошибка'); setBusy(false); return; }
+        serverOutcome = data.outcome; serverWon = !!data.won; serverReward = data.reward ?? 0;
+        serverNewBalance = data.newBalance ?? 0; serverDelta = data.delta ?? 0;
       } catch { hapticError(); showToast('Ошибка сети'); setBusy(false); return; }
     }
 
     setFlipping(true);
-
     setTimeout(() => {
       setFlipping(false);
       setOutcome(serverOutcome);
       setWon(serverWon);
-
       if (!demoMode) {
         window.dispatchEvent(new CustomEvent('balance-update', { detail: { balance: serverNewBalance } }));
         window.dispatchEvent(new CustomEvent('history-update', {
           detail: {
             game: 'Монетка',
             text: `Выпало ${serverOutcome === 'heads' ? 'орёл' : serverOutcome === 'tails' ? 'решка' : 'ребро'}`,
-            amount: serverDelta,
-            win: serverWon,
+            amount: serverDelta, win: serverWon,
           },
         }));
       }
-
       if (serverWon) { hapticSuccess(); showToast(`Победа! +${serverReward} ⭐`); }
       else { hapticError(); showToast('Не угадал'); }
-
       setBusy(false);
     }, 1700);
   };
@@ -1929,24 +1868,18 @@ function Coinfly({
       <div className="heading">
         <small>GAME 05</small>
         <h1>Монетка</h1>
-        <p>Орёл ×2 · Решка ×2 · Ребро ×9</p>
+        <p>Орёл ×2 · Решка ×2 · Ребро ×5</p>
       </div>
 
       <section className="coinfly-box">
         <div className={`coin ${flipping ? 'flipping' : ''} ${outcome === 'edge' ? 'edge-mode' : ''}`}>
           <div className="coin-face">
-            {outcome === null || flipping
-              ? '🪙'
-              : outcome === 'heads' ? '👑'
-              : outcome === 'tails' ? '🦅'
-              : '⚡'}
+            {outcome === null || flipping ? '🪙' : outcome === 'heads' ? '👑' : outcome === 'tails' ? '🦅' : '⚡'}
           </div>
         </div>
-
         {outcome && !flipping && (
           <div className="coinfly-result" style={{ color: outcomeColor(outcome) }}>
-            {outcomeName(outcome)}
-            {won && ' 🎉'}
+            {outcomeName(outcome)}{won && ' 🎉'}
           </div>
         )}
       </section>
@@ -1964,7 +1897,7 @@ function Coinfly({
         </button>
         <button type="button" disabled={flipping || busy} className={choice === 'edge' ? 'selected' : ''}
           onClick={() => { hapticTap(); setChoice('edge'); }}>
-          <span className="emoji">⚡</span><b>Ребро</b><small>x9</small>
+          <span className="emoji">⚡</span><b>Ребро</b><small>x5</small>
         </button>
       </div>
 
@@ -1977,9 +1910,7 @@ function Coinfly({
   );
 }
 
-/* =========================================================
-   TICKETS
-   ========================================================= */
+/* ============== TICKETS ============== */
 
 function Tickets({
   tickets, cases, opening, onOpen, setPage,
@@ -2014,13 +1945,10 @@ function Tickets({
                 <span className="drop-card-chance">{c.minReward}–{c.maxReward} ⭐</span>
                 <span className="drop-card-price">{c.tickets} 🎟</span>
               </div>
-              <button
-                type="button"
-                className="primary-button full"
+              <button type="button" className="primary-button full"
                 style={{ marginTop: 8, minHeight: 44, fontSize: 12 }}
                 disabled={!canOpen || opening === c.id}
-                onClick={() => onOpen(c.id)}
-              >
+                onClick={() => onOpen(c.id)}>
                 {opening === c.id ? 'Открываем...' : canOpen ? 'Открыть' : `Нужно ${c.tickets} 🎟`}
               </button>
             </div>
@@ -2031,9 +1959,7 @@ function Tickets({
   );
 }
 
-/* =========================================================
-   BET BOX
-   ========================================================= */
+/* ============== BET BOX ============== */
 
 function BetBox({ bet, setBet, disabled, balance }: {
   bet: number;
@@ -2051,16 +1977,12 @@ function BetBox({ bet, setBet, disabled, balance }: {
     const parsed = Number(raw);
     if (!Number.isFinite(parsed) || parsed < MIN_BET) { setBet(MIN_BET); setInputValue(String(MIN_BET)); return; }
     const clamped = Math.floor(parsed);
-    setBet(clamped);
-    setInputValue(String(clamped));
+    setBet(clamped); setInputValue(String(clamped));
   };
 
   return (
     <section className="bet-box">
-      <div className="bet-header">
-        <span>Ставка</span>
-        <b>{bet} ⭐</b>
-      </div>
+      <div className="bet-header"><span>Ставка</span><b>{bet} ⭐</b></div>
       <div className="bet-input-row">
         <button type="button" className="bet-step" disabled={disabled || bet <= MIN_BET}
           onClick={() => { hapticTap(); const next = Math.max(MIN_BET, bet - 10); setBet(next); setInputValue(String(next)); }}>−</button>
@@ -2089,15 +2011,11 @@ function BetBox({ bet, setBet, disabled, balance }: {
   );
 }
 
-/* =========================================================
-   BACK BUTTON / HISTORY
-   ========================================================= */
+/* ============== SHARED ============== */
 
 function BackButton({ setPage }: { setPage: (page: Page) => void }) {
   return (
-    <button type="button" className="back-button" onClick={() => { hapticTap(); setPage('home'); }}>
-      ← Назад
-    </button>
+    <button type="button" className="back-button" onClick={() => { hapticTap(); setPage('home'); }}>← Назад</button>
   );
 }
 
@@ -2108,10 +2026,7 @@ function History({ history }: { history: HistoryItem[] }) {
       {history.map((item) => (
         <div className="history-row" key={item.id}>
           <span className={item.win ? 'win' : 'lose'}>{item.win ? '↗' : '↘'}</span>
-          <div>
-            <b>{item.game}</b>
-            <small>{item.text}</small>
-          </div>
+          <div><b>{item.game}</b><small>{item.text}</small></div>
           <strong className={item.amount >= 0 ? 'positive' : 'negative'}>
             {item.amount > 0 ? '+' : ''}{item.amount} ⭐
           </strong>
