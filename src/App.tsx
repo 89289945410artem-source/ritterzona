@@ -174,6 +174,7 @@ const [topupAmount, setTopupAmount] = useState(100);
 const [topupLoading, setTopupLoading] = useState(false);
 const [topupMethod, setTopupMethod] = useState<TopupMethod>('crypto');
 const [topupIsFirst, setTopupIsFirst] = useState(false);
+
   const [cryptoOpen, setCryptoOpen] = useState(false);
   const [cryptoData, setCryptoData] = useState<CryptoData | null>(null);
   const [cryptoWaiting, setCryptoWaiting] = useState(false);
