@@ -155,6 +155,7 @@ function App() {
 
   const [vip, setVip] = useState(false);
   const [vipUntil, setVipUntil] = useState(0);
+  const [smallBetsRemaining, setSmallBetsRemaining] = useState(15);
 
   const [topupOpen, setTopupOpen] = useState(false);
   const [topupAmount, setTopupAmount] = useState(100);
@@ -204,6 +205,7 @@ function App() {
         if (typeof data.profile.streak === 'number') setStreak(data.profile.streak);
         if (typeof data.profile.vip !== 'undefined') setVip(!!data.profile.vip);
         if (typeof data.profile.vipUntil === 'number') setVipUntil(data.profile.vipUntil);
+        if (typeof data.profile.smallBetsRemaining === 'number') setSmallBetsRemaining(data.profile.smallBetsRemaining);
       }
     } catch {}
   }, []);
@@ -232,15 +234,21 @@ function App() {
       const d = (e as CustomEvent).detail;
       if (d && typeof d.tickets === 'number') setTickets(d.tickets);
     }
+    function onSmallBets(e: Event) {
+      const d = (e as CustomEvent).detail;
+      if (d && typeof d.remaining === 'number') setSmallBetsRemaining(d.remaining);
+    }
     window.addEventListener('balance-update', onBalance);
     window.addEventListener('history-update', onHistory);
     window.addEventListener('live-win', onLiveWin);
     window.addEventListener('tickets-update', onTickets);
+    window.addEventListener('small-bets-update', onSmallBets);
     return () => {
       window.removeEventListener('balance-update', onBalance);
       window.removeEventListener('history-update', onHistory);
       window.removeEventListener('live-win', onLiveWin);
       window.removeEventListener('tickets-update', onTickets);
+      window.removeEventListener('small-bets-update', onSmallBets);
     };
   }, [syncBalance]);
 
@@ -284,6 +292,7 @@ function App() {
           setTickets(data.profile.tickets || 0);
           setVip(!!data.profile.vip);
           setVipUntil(data.profile.vipUntil || 0);
+          if (typeof data.profile.smallBetsRemaining === 'number') setSmallBetsRemaining(data.profile.smallBetsRemaining);
           setProfileReady(true);
         } else { setBalance(15); setProfileReady(true); }
       } catch {
@@ -324,7 +333,6 @@ function App() {
     return () => { cancelled = true; window.clearInterval(iv); };
   }, []);
 
-  // Автосинк каждые 5 сек
   useEffect(() => {
     if (!profileReady) return;
     const iv = window.setInterval(() => { void syncBalance(); }, 5000);
@@ -416,7 +424,10 @@ function App() {
           setBalance(data.balance);
           hapticSuccess();
           setTopupOpen(false);
-          showToast(`✅ +${data.amount}${data.bonus ? ` +${data.bonus} бонус` : ''} ⭐`);
+          const parts: string[] = [`+${data.amount}`];
+          if (data.firstBonus) parts.push(`+${data.firstBonus} первый`);
+          if (data.vipBonus) parts.push(`+${data.vipBonus} VIP`);
+          showToast(`✅ ${parts.join(' ')} ⭐`);
           return;
         }
         if (data.invoiceLink && window.Telegram?.WebApp?.openInvoice) {
@@ -628,7 +639,7 @@ function App() {
       </header>
 
       <div key={page}>
-        {page === 'home' && <Home balance={demoMode ? demoBalance : balance} history={history} liveWins={liveWins} level={level} streak={streak} totalBets={totalBets} vip={vip} setPage={setPage} onTopup={openTopup} onNftWithdraw={openNftWithdraw} onBonus={() => setPage('bonus')} onVip={() => setPage('vip')} />}
+        {page === 'home' && <Home balance={demoMode ? demoBalance : balance} history={history} liveWins={liveWins} level={level} streak={streak} totalBets={totalBets} vip={vip} smallBetsRemaining={smallBetsRemaining} setPage={setPage} onTopup={openTopup} onNftWithdraw={openNftWithdraw} onBonus={() => setPage('bonus')} onVip={() => setPage('vip')} />}
         {page === 'roulette' && <Roulette balance={demoMode ? demoBalance : balance} setBalance={demoMode ? setDemoBalance : undefined} demoMode={demoMode} setPage={setPage} showToast={showToast} />}
         {page === 'rocket' && <Rocket balance={demoMode ? demoBalance : balance} setBalance={demoMode ? setDemoBalance : undefined} demoMode={demoMode} setPage={setPage} showToast={showToast} />}
         {page === 'cases' && <Cases balance={demoMode ? demoBalance : balance} setBalance={demoMode ? setDemoBalance : undefined} demoMode={demoMode} vip={vip} setPage={setPage} showToast={showToast} />}
@@ -656,11 +667,19 @@ function App() {
             <h3>Пополнить баланс</h3>
             <p className="modal-sub">
               1 ⭐ = 2 ₽. Минимум 10 ⭐.
-              {topupIsFirst ? ' 🎉 +10% на первый депозит!' : ''}
+              {vip ? ' 👑 VIP: +20%!' : (topupIsFirst ? ' 🎉 +10% на первый!' : '')}
             </p>
             <div className="topup-display">
               <span>+</span>
-              <b>{topupIsFirst ? Math.floor(topupAmount * 1.1) : topupAmount}</b>
+              <b>
+                {Math.floor(
+                  topupAmount *
+                  (1 +
+                    (topupIsFirst ? 0.10 : 0) +
+                    (vip ? 0.20 : 0)
+                  )
+                )}
+              </b>
               <span>⭐</span>
             </div>
             <div className="topup-slider">
@@ -775,7 +794,7 @@ function App() {
 /* ============== HOME ============== */
 
 function Home({
-  balance, history, liveWins, level, streak, totalBets, vip,
+  balance, history, liveWins, level, streak, totalBets, vip, smallBetsRemaining,
   setPage, onTopup, onNftWithdraw, onBonus, onVip,
 }: {
   balance: number;
@@ -785,6 +804,7 @@ function Home({
   streak: number;
   totalBets: number;
   vip: boolean;
+  smallBetsRemaining: number;
   setPage: (page: Page) => void;
   onTopup: () => void;
   onNftWithdraw: () => void;
@@ -827,7 +847,7 @@ function Home({
 
       {vip && (
         <section className="bonus-card" onClick={onVip}>
-          <div><small>👑 VIP активен</small><strong>×2 бонусы · скидка 10%</strong></div>
+          <div><small>👑 VIP активен</small><strong>×2 бонусы · +20% к пополнениям</strong></div>
           <button type="button" onClick={(e) => { e.stopPropagation(); onVip(); }}>Продлить</button>
         </section>
       )}
@@ -839,6 +859,10 @@ function Home({
 
       <section className="bonus-card" style={{ borderColor: 'rgba(59,130,246,0.5)' }}>
         <div><small>🔄 Оборот</small><strong>Каждые 500 ⭐ = 🎟 + 1 ⭐</strong></div>
+      </section>
+
+      <section className="bonus-card" style={{ borderColor: 'rgba(245,158,11,0.4)' }}>
+        <div><small>🎲 Мелкие ставки</small><strong>Осталось {smallBetsRemaining}/15 сегодня</strong></div>
       </section>
 
       <section className="withdraw-card">
@@ -940,6 +964,7 @@ function Vip({
         <div className="vip-card-badge">👑 VIP</div>
         <h2>Что даёт подписка</h2>
         <ul className="vip-list">
+          <li><b>+20%</b> к каждому пополнению</li>
           <li><b>×2</b> к ежедневному бонусу</li>
           <li><b>×2</b> шанс на билет в Box</li>
           <li><b>−10%</b> скидка на все кейсы</li>
@@ -1020,8 +1045,18 @@ function Roulette({
         const initData = window.Telegram?.WebApp?.initData || '';
         const res = await fetch('/api/game/roulette', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ initData, bet: safeBet, selected }) });
         const data = await res.json();
-        if (!res.ok || data.error) { hapticError(); showToast(data.error === 'insufficient funds' ? 'Недостаточно ⭐' : 'Ошибка'); return; }
+        if (!res.ok || data.error) {
+          hapticError();
+          if (data.error === 'small_bet_limit') showToast(data.message || 'Лимит мелких ставок исчерпан');
+          else if (data.error === 'insufficient funds') showToast('Недостаточно ⭐');
+          else showToast('Ошибка');
+          return;
+        }
         if (typeof data.newBalance === 'number') window.dispatchEvent(new CustomEvent('balance-update', { detail: { balance: data.newBalance } }));
+        if (typeof data.smallRemaining === 'number' && data.smallRemaining >= 0) {
+          window.dispatchEvent(new CustomEvent('small-bets-update', { detail: { remaining: data.smallRemaining } }));
+          if (data.smallRemaining <= 3) showToast(`Осталось ${data.smallRemaining} мелких ставок`);
+        }
         winnerMultiplier = data.winner;
         serverReward = data.reward ?? 0;
         serverDelta = data.delta ?? 0;
@@ -1181,11 +1216,21 @@ function Rocket({
         const initData = window.Telegram?.WebApp?.initData || '';
         const res = await fetch('/api/game/rocket/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ initData, bet: safeBet }) });
         const data = await res.json();
-        if (!res.ok || data.error) { hapticError(); showToast(data.error === 'insufficient funds' ? 'Недостаточно ⭐' : 'Ошибка'); return; }
+        if (!res.ok || data.error) {
+          hapticError();
+          if (data.error === 'small_bet_limit') showToast(data.message || 'Лимит мелких ставок исчерпан');
+          else if (data.error === 'insufficient funds') showToast('Недостаточно ⭐');
+          else showToast('Ошибка');
+          return;
+        }
         crashPoint = data.crashPoint;
         newBalance = data.newBalance;
         roundToken = data.roundToken;
         window.dispatchEvent(new CustomEvent('balance-update', { detail: { balance: newBalance } }));
+        if (typeof data.smallRemaining === 'number' && data.smallRemaining >= 0) {
+          window.dispatchEvent(new CustomEvent('small-bets-update', { detail: { remaining: data.smallRemaining } }));
+          if (data.smallRemaining <= 3) showToast(`Осталось ${data.smallRemaining} мелких ставок`);
+        }
       } catch { hapticError(); showToast('Ошибка сети'); return; }
     }
 
@@ -1402,9 +1447,15 @@ function Cases({
         serverResult = await res.json();
         if (!res.ok || serverResult?.error) {
           hapticError();
-          showToast(serverResult?.error === 'insufficient funds' ? 'Недостаточно ⭐'
-            : serverResult?.error === 'cooldown' ? 'Подожди минуту' : 'Ошибка');
+          if (serverResult?.error === 'small_bet_limit') showToast(serverResult?.message || 'Лимит мелких ставок исчерпан');
+          else if (serverResult?.error === 'insufficient funds') showToast('Недостаточно ⭐');
+          else if (serverResult?.error === 'cooldown') showToast('Подожди минуту');
+          else showToast('Ошибка');
           return;
+        }
+        if (typeof serverResult.smallRemaining === 'number' && serverResult.smallRemaining >= 0) {
+          window.dispatchEvent(new CustomEvent('small-bets-update', { detail: { remaining: serverResult.smallRemaining } }));
+          if (serverResult.smallRemaining <= 3) showToast(`Осталось ${serverResult.smallRemaining} мелких ставок`);
         }
       } catch { hapticError(); showToast('Ошибка сети'); return; }
     }
@@ -1465,7 +1516,6 @@ function Cases({
           detail: { game: selectedCase.name, text: `${finalDrop.name} — ${finalDrop.price} ⭐`, amount: delta, win: isProfit },
         }));
         if (serverResult.type === 'ticket') {
-          // синхронизировать билеты
           const initData = window.Telegram?.WebApp?.initData || '';
           fetch('/api/tickets/info', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ initData }) })
             .then(r => r.json()).then(d => {
@@ -1646,10 +1696,20 @@ function Mines({
       const initData = window.Telegram?.WebApp?.initData || '';
       const res = await fetch('/api/game/mines/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ initData, bet: safeBet, minesCount }) });
       const data = await res.json();
-      if (!res.ok || data.error) { hapticError(); showToast(data.error === 'insufficient funds' ? 'Недостаточно ⭐' : 'Ошибка'); return; }
+      if (!res.ok || data.error) {
+        hapticError();
+        if (data.error === 'small_bet_limit') showToast(data.message || 'Лимит мелких ставок исчерпан');
+        else if (data.error === 'insufficient funds') showToast('Недостаточно ⭐');
+        else showToast('Ошибка');
+        return;
+      }
       setBet(safeBet); setRoundToken(data.roundToken); setOpened([]); setMultiplier(1);
       setPotentialReward(0); setExploded(null); setMinePositions([]); setGameEnded(false);
       window.dispatchEvent(new CustomEvent('balance-update', { detail: { balance: data.newBalance } }));
+      if (typeof data.smallRemaining === 'number' && data.smallRemaining >= 0) {
+        window.dispatchEvent(new CustomEvent('small-bets-update', { detail: { remaining: data.smallRemaining } }));
+        if (data.smallRemaining <= 3) showToast(`Осталось ${data.smallRemaining} мелких ставок`);
+      }
     } catch { hapticError(); showToast('Ошибка сети'); }
     finally { setBusy(false); }
   };
@@ -1832,7 +1892,18 @@ function Coinfly({
         const initData = window.Telegram?.WebApp?.initData || '';
         const res = await fetch('/api/game/coinfly', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ initData, bet: safeBet, choice }) });
         const data = await res.json();
-        if (!res.ok || data.error) { hapticError(); showToast(data.error === 'insufficient funds' ? 'Недостаточно ⭐' : 'Ошибка'); setBusy(false); return; }
+        if (!res.ok || data.error) {
+          hapticError();
+          if (data.error === 'small_bet_limit') showToast(data.message || 'Лимит мелких ставок исчерпан');
+          else if (data.error === 'insufficient funds') showToast('Недостаточно ⭐');
+          else showToast('Ошибка');
+          setBusy(false);
+          return;
+        }
+        if (typeof data.smallRemaining === 'number' && data.smallRemaining >= 0) {
+          window.dispatchEvent(new CustomEvent('small-bets-update', { detail: { remaining: data.smallRemaining } }));
+          if (data.smallRemaining <= 3) showToast(`Осталось ${data.smallRemaining} мелких ставок`);
+        }
         serverOutcome = data.outcome; serverWon = !!data.won; serverReward = data.reward ?? 0;
         serverNewBalance = data.newBalance ?? 0; serverDelta = data.delta ?? 0;
       } catch { hapticError(); showToast('Ошибка сети'); setBusy(false); return; }
